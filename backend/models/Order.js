@@ -36,7 +36,7 @@ const orderSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['UPI', 'Credit/Debit Card', 'Net Banking', 'Razorpay', 'Cash on Delivery'],
+      enum: ['UPI', 'Credit/Debit Card', 'Net Banking', 'Razorpay', 'Wallet', 'Cash on Delivery'],
       default: 'Cash on Delivery',
     },
     paymentStatus: {
@@ -65,6 +65,9 @@ const orderSchema = new mongoose.Schema(
     // Committed delivery date (calendar date stored as UTC midnight).
     // Set on an order created by "reorder"; the cancelled source order is never modified.
     reorderedFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', index: true, sparse: true },
+    // A cancelled-order chain can be renewed at most twice. This value is carried
+    // forward to the new order so a cancellation cannot restart the allowance.
+    renewalCount: { type: Number, default: 0, min: 0, max: 2 },
     estimatedDelivery: { type: Date },
     scheduledDelivery: { type: Boolean, default: false }, // customer picked this date
     fastTracked: { type: Boolean, default: false },       // date came from a cancelled order's released slot

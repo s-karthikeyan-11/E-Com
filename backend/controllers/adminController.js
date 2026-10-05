@@ -305,7 +305,7 @@ exports.getReport = async (req, res) => {
 // ---------- Complete reports workspace ----------
 
 const REPORT_STATUSES = ['Awaiting Payment', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
-const REPORT_PAYMENT_METHODS = ['UPI', 'Credit/Debit Card', 'Net Banking', 'Razorpay', 'Cash on Delivery'];
+const REPORT_PAYMENT_METHODS = ['UPI', 'Credit/Debit Card', 'Net Banking', 'Razorpay', 'Wallet', 'Cash on Delivery'];
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_REPORT_PAGE_SIZE = 10000;
 

@@ -4,7 +4,7 @@ const Product = require('../models/Product');
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 const razorpay = require('../config/razorpay');
-const { toDate, isDateStr } = require('../utils/dates');
+const { toDate, toStr, todayStr, isDateStr } = require('../utils/dates');
 const { planDelivery, consumeSlots, restoreSlots, releaseSlots } = require('../utils/delivery');
 const { validateShippingAddress } = require('../utils/address');
 const { getEligibleCoupon, getNextRewardOrderNumber, calculateCouponDiscount } = require('../utils/coupons');
@@ -94,7 +94,39 @@ const creditWalletRefund = async (order) => {
 const FREE_DELIVERY_THRESHOLD = 2000;
 const DELIVERY_FEE = 99;
 const REORDER_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MAX_RENEWALS = 2;
 const computeDeliveryFee = (itemTotal) => (itemTotal >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE);
+
+// Debits the refund wallet only when it contains the whole server-calculated
+// renewal total. The balance check, debit, and ledger entry are one atomic
+// document update, so concurrent renewal attempts cannot overspend it.
+const debitWalletForRenewal = async (userId, orderId, amount) => {
+  const now = new Date();
+  const result = await User.updateOne(
+    { _id: userId, walletBalance: mongoose.trusted({ $gte: amount }) },
+    {
+      $inc: { walletBalance: -amount },
+      $push: { walletTransactions: { order: orderId, type: 'Payment', amount, createdAt: now } },
+    },
+    { runValidators: true }
+  );
+  if (result.modifiedCount !== 1) {
+    throw httpError(409, 'Your wallet balance is insufficient for this renewal. Add funds or place a new order from your cart.');
+  }
+};
+
+// A renewal can fail after the wallet has been debited (for example, while
+// creating the order). Restore exactly that ledger entry and amount on rollback.
+const reverseWalletRenewalPayment = async (userId, orderId, amount) => {
+  const result = await User.updateOne(
+    { _id: userId, walletTransactions: mongoose.trusted({ $elemMatch: { order: orderId, type: 'Payment' } }) },
+    {
+      $inc: { walletBalance: amount },
+      $pull: { walletTransactions: { order: orderId, type: 'Payment' } },
+    }
+  );
+  if (result.modifiedCount !== 1) throw new Error('Could not restore the wallet payment');
+};
 
 const getCheckoutLock = async (userId) => {
   const staleLock = new Date(Date.now() - CHECKOUT_LOCK_TIMEOUT_MS);
@@ -687,15 +719,14 @@ exports.updateOrderStatus = async (req, res) => {
   }
 };
 
-// POST /api/orders/:id/cancel -- customer cancels their own Cash on Delivery order
+// POST /api/orders/:id/cancel -- customer cancels their own eligible order.
+// Paid online orders are refunded to the wallet by transitionOrder; COD has no
+// payment to refund before delivery.
 exports.cancelMyOrder = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid order ID' });
     const order = await Order.findOne({ _id: req.params.id, user: req.user._id });
     if (!order) return res.status(404).json({ message: 'Order not found' });
-    if (order.paymentMethod !== 'Cash on Delivery') {
-      return res.status(409).json({ message: 'Online-paid orders cannot be cancelled here. Please contact support for a refund.' });
-    }
     if (!['Pending', 'Processing'].includes(order.status)) {
       return res.status(409).json({ message: `${order.status} orders can no longer be cancelled` });
     }
@@ -735,13 +766,13 @@ const getCancelledAt = (order) => {
 };
 
 // POST /api/orders/:id/reorder
-// Creates a NEW Cash on Delivery order from a cancelled order, within 24h of cancellation.
-// Uses today's price and stock. The cancelled order is never modified or reactivated, and
-// the customer's cart is left alone. Online payment must be chosen again via the cart.
+// Creates a NEW wallet-paid order from a cancelled order, within 24h of cancellation.
+// Uses today's price and stock. The cancelled order is never modified or reactivated.
 exports.reorderCancelledOrder = async (req, res) => {
   let checkoutLocked = false;
   let reservedItems = [];
   let deliverySlots = [];
+  let walletPayment;
 
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid order ID' });
@@ -751,8 +782,12 @@ exports.reorderCancelledOrder = async (req, res) => {
     if (Date.now() - getCancelledAt(source).getTime() > REORDER_WINDOW_MS) {
       return res.status(409).json({ message: 'The 24-hour reorder window for this order has ended. Please add the items to your cart instead.' });
     }
+    const renewalCount = Number.isInteger(source.renewalCount) ? source.renewalCount : 0;
+    if (renewalCount >= MAX_RENEWALS) {
+      return res.status(409).json({ message: 'This order has already used both renewal opportunities.' });
+    }
     if (await Order.exists({ reorderedFrom: source._id })) {
-      return res.status(409).json({ message: 'This order has already been reordered' });
+      return res.status(409).json({ message: 'This cancellation has already been renewed' });
     }
     const shippingAddress = validateShippingAddress(source.shippingAddress && source.shippingAddress.toObject());
     if (!shippingAddress) return res.status(400).json({ message: 'The saved address on this order is incomplete. Add the items to your cart and check out instead.' });
@@ -792,30 +827,49 @@ exports.reorderCancelledOrder = async (req, res) => {
     const itemTotal = +(subtotal + totalGst).toFixed(2);
     const deliveryFee = computeDeliveryFee(itemTotal);
 
-    const delivery = await commitDelivery(items, undefined);
+    // Retain the original committed delivery day when it is still a current
+    // calendar day. The cancellation released its product slots for 24 hours,
+    // and commitDelivery atomically claims them again when they are needed.
+    // If the original date has passed, a fresh earliest delivery is the only
+    // valid promise we can make.
+    const originalDeliveryDate = source.estimatedDelivery ? toStr(source.estimatedDelivery) : undefined;
+    const delivery = await commitDelivery(
+      items,
+      originalDeliveryDate && originalDeliveryDate >= todayStr() ? originalDeliveryDate : undefined
+    );
     deliverySlots = delivery.consumed;
     reservedItems = await reserveStock(items);
 
+    const totalAmount = +(itemTotal + deliveryFee).toFixed(2);
+    const orderId = new mongoose.Types.ObjectId();
+    await debitWalletForRenewal(req.user._id, orderId, totalAmount);
+    walletPayment = { orderId, amount: totalAmount };
+
     const order = await Order.create({
+      _id: orderId,
       user: req.user._id,
       items,
       subtotal: +subtotal.toFixed(2),
       totalGst: +totalGst.toFixed(2),
-      totalAmount: +(itemTotal + deliveryFee).toFixed(2),
+      totalAmount,
       deliveryFee,
-      paymentMethod: 'Cash on Delivery',
+      paymentMethod: 'Wallet',
+      paymentStatus: 'Paid',
+      paidAt: new Date(),
       shippingAddress,
       status: 'Pending',
       estimatedDelivery: delivery.estimatedDelivery,
-      scheduledDelivery: false,
+      scheduledDelivery: delivery.scheduledDelivery,
       fastTracked: delivery.fastTracked,
       reorderedFrom: source._id,
+      renewalCount: renewalCount + 1,
     });
     res.status(201).json(toCustomerOrder(order));
   } catch (err) {
     try {
       await restoreSlots(deliverySlots);
       await releaseStock(reservedItems);
+      if (walletPayment) await reverseWalletRenewalPayment(req.user._id, walletPayment.orderId, walletPayment.amount);
     } catch (rollbackError) {
       console.error('Reorder rollback failed:', rollbackError);
     }

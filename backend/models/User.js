@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const walletTransactionSchema = new mongoose.Schema(
   {
     order: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true },
-    type: { type: String, enum: ['Refund'], required: true },
+    type: { type: String, enum: ['Refund', 'Payment'], required: true },
     amount: { type: Number, required: true, min: 0.01 },
     createdAt: { type: Date, default: Date.now },
   },

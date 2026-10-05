@@ -5,11 +5,15 @@ import api from '../api/axios';
 import { formatDay } from '../utils/dates';
 import StatusBadge from '../components/StatusBadge';
 import ReorderButton from '../components/ReorderButton';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const Orders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [orderToCancel, setOrderToCancel] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState('');
 
   const loadOrders = () => {
     setLoading(true);
@@ -21,6 +25,21 @@ const Orders = () => {
   };
 
   useEffect(() => { loadOrders(); }, []);
+
+  const cancelOrder = async () => {
+    if (!orderToCancel) return;
+    setCancelling(true);
+    setCancelError('');
+    try {
+      const { data } = await api.post(`/orders/${orderToCancel._id}/cancel`);
+      setOrders((current) => current.map((order) => (order._id === data._id ? data : order)));
+      setOrderToCancel(null);
+    } catch (err) {
+      setCancelError(err.response?.data?.message || 'Could not cancel this order.');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -41,6 +60,7 @@ const Orders = () => {
       </div>
 
       {error && <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center"><p className="text-sm text-red-800">{error}</p><button type="button" className="btn btn-secondary mt-4" onClick={loadOrders}>Try again</button></div>}
+      {cancelError && <div role="alert" className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{cancelError}</div>}
 
       {!error && orders.length === 0 && (
         <div className="mx-auto max-w-2xl rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center">
@@ -76,6 +96,7 @@ const Orders = () => {
               </div>
 
               <div className="mt-4 flex flex-wrap items-start justify-end gap-3">
+                {['Pending', 'Processing'].includes(o.status) && <button type="button" className="btn btn-outline" onClick={() => { setCancelError(''); setOrderToCancel(o); }}>Cancel order</button>}
                 <ReorderButton order={o} className="btn btn-outline" />
                 <Link className="btn btn-primary" to={`/order/${o._id}`}>{o.status === 'Cancelled' ? 'View details' : 'Track order'}</Link>
               </div>
@@ -83,6 +104,16 @@ const Orders = () => {
           ))}
         </div>
       )}
+      <ConfirmDialog
+        open={Boolean(orderToCancel)}
+        busy={cancelling}
+        danger
+        title="Cancel this order?"
+        message={orderToCancel?.paymentStatus === 'Paid' ? 'This cannot be undone. Items go back to stock and your paid amount is credited to your refund wallet. You can reorder within 24 hours.' : 'This cannot be undone. Items go back to stock. You can reorder within 24 hours of cancelling.'}
+        confirmLabel="Cancel order"
+        onConfirm={cancelOrder}
+        onCancel={() => !cancelling && setOrderToCancel(null)}
+      />
     </div>
   );
 };

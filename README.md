@@ -51,6 +51,10 @@ npm run seed               # creates an admin account + sample products
 npm run dev                 # starts on http://localhost:5000
 ```
 
+If an older database contains accounts with `role: "seller"`, run `npm run migrate:roles`
+once from `backend/`. This project supports only `user` and `admin`; the migration safely
+normalizes those legacy customer records to `user` and can be run again without side effects.
+
 Development-only seeded admin login: `admin@example.com` / `admin123`. In production, set
 `SEED_ADMIN_EMAIL` and a unique `SEED_ADMIN_PASSWORD` (12+ characters) before seeding.
 
