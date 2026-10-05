@@ -1,0 +1,112 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+    font-family: 'Manrope', system-ui, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-sans font-semibold tracking-tight text-slate-900;
+  }
+
+  img {
+    @apply block max-w-full;
+  }
+
+  a {
+    @apply transition-colors duration-200;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-primary {
+    @apply bg-indigo-700 text-white shadow-sm hover:bg-indigo-800 focus:ring-indigo-300;
+  }
+
+  .btn-danger {
+    @apply bg-red-600 text-white shadow-sm hover:bg-red-700 focus:ring-red-300;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-slate-900 ring-1 ring-slate-200 hover:bg-slate-100;
+  }
+
+  .btn-outline {
+    @apply border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50;
+  }
+
+  .card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-soft;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-100;
+  }
+
+  .link-btn {
+    @apply cursor-pointer border-none bg-transparent p-0 text-sm font-medium text-slate-600 underline-offset-4 hover:text-slate-900 hover:underline;
+  }
+
+  .table-th {
+    @apply border-b border-slate-200 px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.08em] text-slate-500;
+  }
+
+  .table-td {
+    @apply border-b border-slate-200 px-4 py-3 text-sm text-slate-700;
+  }
+
+  .glass-panel {
+    @apply rounded-2xl border border-white/50 bg-white/75 backdrop-blur-xl;
+  }
+
+  .admin-shell {
+    @apply rounded-[30px] border border-slate-200 bg-white/80 shadow-soft backdrop-blur-sm;
+  }
+
+  .admin-card {
+    @apply rounded-[26px] border border-slate-200 bg-white shadow-soft;
+  }
+
+  .admin-badge {
+    @apply inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em];
+  }
+
+  .table-chip {
+    @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+
+  .section-shell {
+    @apply mx-auto max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .app-content {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
+
+  .app-footer {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
+
+  @media (min-width: 1024px) {
+    .app-content,
+    .app-footer {
+      padding-bottom: 0;
+    }
+  }
+}
