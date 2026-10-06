@@ -6,6 +6,7 @@ const {
   createRazorpayOrder,
   verifyRazorpayPayment,
   cancelRazorpayPayment,
+  recordRazorpayPaymentFailure,
   getMyOrders,
   getOrderById,
   cancelMyOrder,
@@ -19,6 +20,7 @@ router.use(protect);
 router.post('/razorpay', customerOnly, createRazorpayOrder);
 router.post('/razorpay/verify', customerOnly, verifyRazorpayPayment);
 router.post('/:id/payment/cancel', customerOnly, cancelRazorpayPayment);
+router.post('/:id/payment/failed', customerOnly, recordRazorpayPaymentFailure);
 router.get('/delivery-estimate', customerOnly, getDeliveryEstimate);
 router.get('/coupon', customerOnly, getCouponStatus);
 router.post('/:id/cancel', customerOnly, cancelMyOrder);

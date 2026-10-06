@@ -110,3 +110,19 @@
     }
   }
 }
+
+/* Razorpay In-Page Embedded Checkout Styles */
+.razorpay-backdrop {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+iframe.razorpay-checkout-frame {
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
+  border-radius: 16px !important;
+  overflow: hidden !important;
+  background-color: #ffffff !important;
+  transition: opacity 0.2s ease-in-out !important;
+}

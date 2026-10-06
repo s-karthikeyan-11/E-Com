@@ -1,6 +1,7 @@
 const Order = require('../models/Order');
 const User = require('../models/User');
 const Product = require('../models/Product');
+const Payment = require('../models/Payment');
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 const razorpay = require('../config/razorpay');
@@ -32,6 +33,16 @@ const logRazorpayError = (context, err) => {
     code: err?.error?.code || err?.code,
     description: err?.error?.description || err?.description || err?.message,
   });
+};
+
+const mapRazorpayMethod = (method) => {
+  if (!method) return 'Razorpay';
+  const m = String(method).toLowerCase();
+  if (m === 'upi') return 'UPI';
+  if (m === 'card') return 'Credit/Debit Card';
+  if (m === 'netbanking') return 'Net Banking';
+  if (m === 'wallet') return 'Wallet';
+  return 'Razorpay';
 };
 
 // Cost and gateway-fee snapshots are internal accounting data. `select: false`
@@ -456,6 +467,16 @@ exports.createRazorpayOrder = async (req, res) => {
     localOrder.razorpayOrderId = razorpayOrder.id;
     await localOrder.save();
 
+    await Payment.create({
+      user: checkout.user._id,
+      order: localOrder._id,
+      razorpayOrderId: razorpayOrder.id,
+      paymentMethod: 'Razorpay',
+      amount: localOrder.totalAmount,
+      currency: 'INR',
+      status: 'CREATED',
+    });
+
     res.status(201).json({
       orderId: localOrder._id,
       keyId: process.env.RAZORPAY_KEY_ID,
@@ -468,7 +489,10 @@ exports.createRazorpayOrder = async (req, res) => {
   } catch (err) {
     logRazorpayError('order creation', err);
     try {
-      if (localOrder) await localOrder.deleteOne();
+      if (localOrder) {
+        await Payment.deleteMany({ order: localOrder._id });
+        await localOrder.deleteOne();
+      }
       await restoreSlots(deliverySlots);
       await releaseStock(reservedItems);
       if (cartCleared && checkout) await restoreCart(checkout.user._id, checkout.originalCart);
@@ -521,6 +545,8 @@ exports.verifyRazorpayPayment = async (req, res) => {
       return res.status(409).json({ message: 'Payment is not captured for this order yet' });
     }
 
+    const detectedMethod = mapRazorpayMethod(payment.method);
+
     const paidOrder = await Order.findOneAndUpdate(
       {
         _id: order._id,
@@ -533,6 +559,7 @@ exports.verifyRazorpayPayment = async (req, res) => {
         $set: {
           status: 'Pending',
           paymentStatus: 'Paid',
+          paymentMethod: detectedMethod,
           razorpayPaymentId: paymentId,
           razorpaySignature: signature,
           ...(Number.isFinite(payment.fee) ? { paymentGatewayFee: payment.fee / 100 } : {}),
@@ -545,6 +572,21 @@ exports.verifyRazorpayPayment = async (req, res) => {
     if (!paidOrder) {
       return res.status(409).json({ message: 'This payment is already being processed. Refresh the order history.' });
     }
+
+    await Payment.findOneAndUpdate(
+      { razorpayOrderId: order.razorpayOrderId },
+      {
+        $set: {
+          razorpayPaymentId: paymentId,
+          razorpaySignature: signature,
+          paymentMethod: detectedMethod,
+          status: 'SUCCESS',
+          signatureVerified: true,
+          ...(Number.isFinite(payment.fee) ? { gatewayFee: payment.fee / 100 } : {}),
+          paidAt: new Date(),
+        },
+      }
+    );
 
     res.json({ order: paidOrder });
   } catch (err) {
@@ -583,6 +625,16 @@ exports.cancelRazorpayPayment = async (req, res) => {
       return res.status(409).json({ message: 'This payment is already being processed. Refresh the order history.' });
     }
 
+    await Payment.findOneAndUpdate(
+      { razorpayOrderId: order.razorpayOrderId },
+      {
+        $set: {
+          status: 'FAILED',
+          errorDescription: req.body?.reason || 'Payment cancelled or dismissed by customer',
+        },
+      }
+    );
+
     try {
       await releaseStock(order.items);
       await restoreCart(req.user._id, order.items);
@@ -602,6 +654,31 @@ exports.cancelRazorpayPayment = async (req, res) => {
   } catch (err) {
     logRazorpayError('payment cancellation', err);
     res.status(err.status || 500).json({ message: err.status ? err.message : 'Failed to cancel Razorpay payment' });
+  }
+};
+
+// POST /api/orders/:id/payment/failed
+exports.recordRazorpayPaymentFailure = async (req, res) => {
+  try {
+    const order = await Order.findOne({ _id: req.params.id, user: req.user._id });
+    if (!order || order.paymentMethod !== 'Razorpay') {
+      return res.status(404).json({ message: 'Razorpay order not found' });
+    }
+    const { errorDescription, paymentId } = req.body || {};
+    await Payment.findOneAndUpdate(
+      { razorpayOrderId: order.razorpayOrderId },
+      {
+        $set: {
+          status: 'FAILED',
+          ...(paymentId ? { razorpayPaymentId: paymentId } : {}),
+          errorDescription: errorDescription || 'Payment attempt failed',
+        },
+      }
+    );
+    res.json({ message: 'Payment failure recorded' });
+  } catch (err) {
+    logRazorpayError('failure recording', err);
+    res.status(500).json({ message: 'Failed to record payment failure' });
   }
 };
 
