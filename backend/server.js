@@ -14,6 +14,7 @@ const cartRoutes = require('./routes/cartRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const addressRoutes = require('./routes/addressRoutes');
+const sellerRoutes = require('./routes/sellerRoutes');
 
 const app = express();
 const configuredClientOrigins = getClientOrigins();
@@ -53,7 +54,7 @@ app.use(cors({
   maxAge: 86400,
 }));
 app.use(cookieParser());
-app.use(express.json({ limit: '20kb' }));
+app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (req, res) => {
   const databaseConnected = mongoose.connection.readyState === 1;
@@ -69,6 +70,8 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/seller', sellerRoutes);
+app.use('/api/sellers', sellerRoutes);
 
 // 404 handler
 app.use((req, res) => res.status(404).json({ message: 'Route not found' }));

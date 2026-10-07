@@ -26,7 +26,7 @@ exports.getProducts = async (req, res) => {
       ]);
     }
     if (category) filter.category = category;
-    const products = await Product.find(filter).sort({ createdAt: -1 });
+    const products = await Product.find(filter).populate('seller', 'storeName rating').sort({ createdAt: -1 });
     res.json(products);
   } catch (err) {
     res.status(errorStatus(err)).json({ message: 'Failed to fetch products' });
@@ -36,7 +36,9 @@ exports.getProducts = async (req, res) => {
 // GET /api/products/:id (public)
 exports.getProductById = async (req, res) => {
   try {
-    const product = await Product.findOne({ _id: req.params.id, isActive: true }).select('+releasedSlots');
+    const product = await Product.findOne({ _id: req.params.id, isActive: true })
+      .populate('seller', 'storeName rating storeDescription storeLogo')
+      .select('+releasedSlots');
     if (!product) return res.status(404).json({ message: 'Product not found' });
     res.json({ ...product.toJSON(), estimatedDelivery: planForProduct(product, 1).date });
   } catch (err) {
@@ -49,7 +51,7 @@ exports.getProductById = async (req, res) => {
 // GET /api/admin/products (includes inactive)
 exports.adminGetProducts = async (req, res) => {
   try {
-    const products = await Product.find().select('+costPrice').sort({ createdAt: -1 });
+    const products = await Product.find().populate('seller', 'storeName email').select('+costPrice').sort({ createdAt: -1 });
     res.json(products);
   } catch (err) {
     res.status(errorStatus(err)).json({ message: 'Failed to fetch products' });

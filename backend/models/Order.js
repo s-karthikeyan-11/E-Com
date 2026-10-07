@@ -4,6 +4,12 @@ const orderItemSchema = new mongoose.Schema(
   {
     product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
     name: { type: String, required: true },
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', default: null, index: true },
+    sellerStatus: {
+      type: String,
+      enum: ['Pending', 'Confirmed', 'Packed', 'Shipped', 'Delivered', 'Cancelled'],
+      default: 'Pending',
+    },
     // Immutable analytics snapshots for orders placed after cost reporting was added.
     category: { type: String, trim: true, maxlength: 60 },
     unitCost: { type: Number, min: 0, select: false },
@@ -59,7 +65,7 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Awaiting Payment', 'Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'],
+      enum: ['Awaiting Payment', 'Pending', 'Confirmed', 'Packed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'],
       default: 'Pending',
     },
     // Committed delivery date (calendar date stored as UTC midnight).

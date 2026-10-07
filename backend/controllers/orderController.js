@@ -9,6 +9,7 @@ const { toDate, toStr, todayStr, isDateStr } = require('../utils/dates');
 const { planDelivery, consumeSlots, restoreSlots, releaseSlots } = require('../utils/delivery');
 const { validateShippingAddress } = require('../utils/address');
 const { getEligibleCoupon, getNextRewardOrderNumber, calculateCouponDiscount } = require('../utils/coupons');
+const { recordSellerEarningsForOrder } = require('./sellerController');
 
 const errorStatus = (err) => (err.name === 'ValidationError' || err.name === 'CastError' ? 400 : 500);
 
@@ -174,7 +175,7 @@ const resolveCoupon = async (userId, itemTotal, required) => {
 
 const getCheckoutDetails = async (userId, applyCoupon = false) => {
   // Cost is server-only, but is snapshotted onto the order for profit reporting.
-  const user = await User.findById(userId).populate({ path: 'cart.product', select: '+costPrice' });
+  const user = await User.findById(userId).populate({ path: 'cart.product', select: '+costPrice seller' });
   if (!user) throw httpError(401, 'User no longer exists');
   if (!user.cart.length) throw httpError(400, 'Cart is empty');
 
@@ -204,6 +205,8 @@ const getCheckoutDetails = async (userId, applyCoupon = false) => {
     items.push({
       product: product._id,
       name: product.name,
+      seller: product.seller || null,
+      sellerStatus: 'Pending',
       category: product.category,
       ...(Number.isFinite(product.costPrice) ? { unitCost: product.costPrice } : {}),
       quantity: cartItem.quantity,
@@ -384,6 +387,8 @@ exports.placeOrder = async (req, res) => {
       fastTracked: delivery.fastTracked,
     });
 
+    await recordSellerEarningsForOrder(order).catch(console.error);
+
     res.status(201).json(toCustomerOrder(order));
   } catch (err) {
     // Sequential writes are used so standalone MongoDB works. Compensate every
@@ -517,7 +522,7 @@ exports.verifyRazorpayPayment = async (req, res) => {
     }
 
     const order = await Order.findOne({ _id: orderId, user: req.user._id });
-    if (!order || order.paymentMethod !== 'Razorpay') {
+    if (!order || !order.razorpayOrderId) {
       return res.status(404).json({ message: 'Razorpay order not found' });
     }
     if (order.paymentStatus === 'Paid') {
@@ -588,6 +593,8 @@ exports.verifyRazorpayPayment = async (req, res) => {
       }
     );
 
+    await recordSellerEarningsForOrder(paidOrder).catch(console.error);
+
     res.json({ order: paidOrder });
   } catch (err) {
     logRazorpayError('payment verification', err);
@@ -602,7 +609,7 @@ exports.verifyRazorpayPayment = async (req, res) => {
 exports.cancelRazorpayPayment = async (req, res) => {
   try {
     const order = await Order.findOne({ _id: req.params.id, user: req.user._id });
-    if (!order || order.paymentMethod !== 'Razorpay') {
+    if (!order || !order.razorpayOrderId) {
       return res.status(404).json({ message: 'Razorpay order not found' });
     }
     if (order.paymentStatus === 'Paid') return res.status(409).json({ message: 'This order has already been paid' });
@@ -661,7 +668,7 @@ exports.cancelRazorpayPayment = async (req, res) => {
 exports.recordRazorpayPaymentFailure = async (req, res) => {
   try {
     const order = await Order.findOne({ _id: req.params.id, user: req.user._id });
-    if (!order || order.paymentMethod !== 'Razorpay') {
+    if (!order || !order.razorpayOrderId) {
       return res.status(404).json({ message: 'Razorpay order not found' });
     }
     const { errorDescription, paymentId } = req.body || {};

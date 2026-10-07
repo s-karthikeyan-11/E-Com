@@ -22,6 +22,18 @@ import AdminOrders from './pages/admin/Orders';
 import AdminUsers from './pages/admin/Users';
 import AdminPayments from './pages/admin/Payments';
 import AdminReports from './pages/admin/Reports';
+import AdminSellers from './pages/admin/Sellers';
+
+import SellerRoute from './components/SellerRoute';
+import SellerLayout from './pages/seller/SellerLayout';
+import SellerRegister from './pages/seller/SellerRegister';
+import SellerLogin from './pages/seller/SellerLogin';
+import SellerDashboard from './pages/seller/SellerDashboard';
+import SellerProducts from './pages/seller/SellerProducts';
+import SellerOrders from './pages/seller/SellerOrders';
+import SellerEarnings from './pages/seller/SellerEarnings';
+import SellerProfile from './pages/seller/SellerProfile';
+import SellerStore from './pages/seller/SellerStore';
 
 import Checkout from './pages/Checkout';
 import Profile from './pages/Profile';
@@ -85,6 +97,28 @@ const App = () => (
                 path="/register"
                 element={<Register />}
               />
+
+              {/* Seller Authentication & Public Storefront */}
+              <Route path="/seller/register" element={<SellerRegister />} />
+              <Route path="/seller/login" element={<SellerLogin />} />
+              <Route path="/store/:sellerId" element={<SellerStore />} />
+
+              {/* Protected Seller Portal */}
+              <Route
+                path="/seller"
+                element={
+                  <SellerRoute>
+                    <SellerLayout />
+                  </SellerRoute>
+                }
+              >
+                <Route index element={<Navigate to="/seller/dashboard" replace />} />
+                <Route path="dashboard" element={<SellerDashboard />} />
+                <Route path="products" element={<SellerProducts />} />
+                <Route path="orders" element={<SellerOrders />} />
+                <Route path="earnings" element={<SellerEarnings />} />
+                <Route path="profile" element={<SellerProfile />} />
+              </Route>
 
               {/* Customer Protected Pages */}
               <Route
@@ -171,6 +205,11 @@ const App = () => (
                 <Route
                   index
                   element={<Dashboard />}
+                />
+
+                <Route
+                  path="sellers"
+                  element={<AdminSellers />}
                 />
 
                 <Route

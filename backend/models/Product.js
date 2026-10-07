@@ -5,6 +5,7 @@ const productSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true, maxlength: 160 },
     description: { type: String, default: '', maxlength: 4000 },
     category: { type: String, default: 'General', trim: true, maxlength: 60 },
+    seller: { type: mongoose.Schema.Types.ObjectId, ref: 'Seller', default: null, index: true },
     image: { type: String, default: '', maxlength: 2048 },
     price: { type: Number, required: true, min: 0 }, // base price before discount/GST
     // Optional internal cost. Missing historical values must never be treated as

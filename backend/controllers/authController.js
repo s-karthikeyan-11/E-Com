@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const Seller = require('../models/Seller');
 const { getCookieSameSite } = require('../config/env');
 
 const normalizeEmail = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
@@ -59,7 +60,11 @@ exports.login = async (req, res) => {
     if (user.isBlocked) return res.status(403).json({ message: 'Account is blocked' });
 
     const token = signToken(user._id);
-    res.cookie('token', token, cookieOptions(remember !== false)).json({ user: user.toSafeObject() });
+    let seller = null;
+    if (user.role === 'seller') {
+      seller = await Seller.findOne({ user: user._id });
+    }
+    res.cookie('token', token, cookieOptions(remember !== false)).json({ user: user.toSafeObject(), seller });
   } catch (err) {
     res.status(500).json({ message: 'Login failed' });
   }
@@ -67,7 +72,12 @@ exports.login = async (req, res) => {
 
 // GET /api/auth/me
 exports.getMe = async (req, res) => {
-  res.json({ user: req.user.toSafeObject() });
+  const safeUser = req.user.toSafeObject();
+  let seller = null;
+  if (req.user.role === 'seller') {
+    seller = await Seller.findOne({ user: req.user._id });
+  }
+  res.json({ user: safeUser, seller });
 };
 
 // GET /api/auth/wallet -- the signed-in customer's refund wallet and history

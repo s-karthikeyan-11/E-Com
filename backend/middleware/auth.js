@@ -21,10 +21,48 @@ const protect = async (req, res, next) => {
   }
 };
 
+const Seller = require('../models/Seller');
+
 // Requires req.user to have role 'admin'
 const adminOnly = (req, res, next) => {
   if (req.user && req.user.role === 'admin') return next();
   return res.status(403).json({ message: 'Admin access required' });
+};
+
+// Requires req.user to have role 'seller' and an Approved seller status
+const sellerOnly = async (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Not authorized' });
+  }
+  if (req.user.role !== 'seller') {
+    return res.status(403).json({ message: 'Seller access required' });
+  }
+  const seller = await Seller.findOne({ user: req.user._id });
+  if (!seller) {
+    return res.status(404).json({ message: 'Seller profile not found' });
+  }
+  if (seller.status === 'Pending') {
+    return res.status(403).json({
+      message: 'Your seller account is pending admin approval',
+      sellerStatus: 'Pending',
+    });
+  }
+  if (seller.status === 'Rejected') {
+    return res.status(403).json({
+      message: seller.rejectionReason
+        ? `Your seller application was rejected: ${seller.rejectionReason}`
+        : 'Your seller application was rejected by the admin',
+      sellerStatus: 'Rejected',
+    });
+  }
+  if (seller.status === 'Suspended') {
+    return res.status(403).json({
+      message: 'Your seller account has been suspended by the admin',
+      sellerStatus: 'Suspended',
+    });
+  }
+  req.seller = seller;
+  next();
 };
 
 const customerOnly = (req, res, next) => {
@@ -32,4 +70,4 @@ const customerOnly = (req, res, next) => {
   return res.status(403).json({ message: 'Only customers can place orders' });
 };
 
-module.exports = { protect, adminOnly, customerOnly };
+module.exports = { protect, adminOnly, sellerOnly, customerOnly };

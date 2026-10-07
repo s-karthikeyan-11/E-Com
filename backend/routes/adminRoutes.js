@@ -2,7 +2,19 @@ const express = require('express');
 const router = express.Router();
 const { protect, adminOnly } = require('../middleware/auth');
 
-const { getDashboard, getUsers, setUserBlocked, deleteUser, getAnalytics, getPayments, getReport, getReports } = require('../controllers/adminController');
+const {
+  getDashboard,
+  getUsers,
+  setUserBlocked,
+  deleteUser,
+  getAnalytics,
+  getPayments,
+  getReport,
+  getReports,
+  getSellers,
+  getSellerById,
+  updateSellerStatus,
+} = require('../controllers/adminController');
 const {
   adminGetProducts,
   createProduct,
@@ -19,6 +31,11 @@ router.get('/analytics', getAnalytics);
 router.get('/payments', getPayments);
 router.get('/report', getReport);
 router.get('/reports', getReports);
+
+// Seller Management routes
+router.get('/sellers', getSellers);
+router.get('/sellers/:id', getSellerById);
+router.put('/sellers/:id/status', updateSellerStatus);
 
 router.get('/products', adminGetProducts);
 router.post('/products', createProduct);

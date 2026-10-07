@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { Heart, House, LayoutGrid, LogOut, Search, ShoppingBag, ShoppingCart, UserRound, WalletCards } from 'lucide-react';
+import { Heart, House, LayoutGrid, LogOut, Search, ShoppingBag, ShoppingCart, Store, UserRound, WalletCards } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 
@@ -17,6 +17,8 @@ const Navbar = () => {
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [profileOpen, setProfileOpen] = useState(false);
+
+  const isSeller = user?.role === 'seller';
 
   const handleLogout = () => {
     logout();
@@ -39,8 +41,9 @@ const Navbar = () => {
   const mobileLinks = [
     { to: '/', label: 'Home', icon: House, end: true },
     { to: '/categories', label: 'Categories', icon: LayoutGrid },
-    ...(!isAdmin ? [{ to: '/wishlist', label: 'Wishlist', icon: Heart }] : []),
-    ...(!isAdmin ? [{ to: '/cart', label: 'Cart', icon: ShoppingCart, count: itemCount }] : []),
+    ...(!isAdmin && !isSeller ? [{ to: '/wishlist', label: 'Wishlist', icon: Heart }] : []),
+    ...(!isAdmin && !isSeller ? [{ to: '/cart', label: 'Cart', icon: ShoppingCart, count: itemCount }] : []),
+    ...(isSeller ? [{ to: '/seller/dashboard', label: 'Seller Hub', icon: Store }] : []),
     { to: user ? '/profile' : '/login', label: user ? 'Profile' : 'Login', icon: UserRound },
   ];
 
@@ -64,15 +67,27 @@ const Navbar = () => {
           </nav>
 
           <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
-            {!isAdmin && <Link to="/wishlist" aria-label="Wishlist" title="Wishlist" className="hidden h-10 w-10 items-center justify-center rounded-xl text-slate-700 transition hover:bg-slate-100 lg:inline-flex"><Heart size={19} /></Link>}
-            {!isAdmin && <Link to="/cart" aria-label={`Cart, ${itemCount} items`} title="Cart" className="relative hidden h-10 w-10 items-center justify-center rounded-xl text-slate-700 transition hover:bg-slate-100 lg:inline-flex">
+            {isSeller ? (
+              <Link to="/seller/dashboard" className="hidden lg:inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition shadow-xs">
+                <Store size={15} />
+                Seller Hub
+              </Link>
+            ) : !isAdmin ? (
+              <Link to="/seller/register" className="hidden lg:inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-xs">
+                <Store size={15} className="text-slate-500" />
+                Become a Seller
+              </Link>
+            ) : null}
+
+            {!isAdmin && !isSeller && <Link to="/wishlist" aria-label="Wishlist" title="Wishlist" className="hidden h-10 w-10 items-center justify-center rounded-xl text-slate-700 transition hover:bg-slate-100 lg:inline-flex"><Heart size={19} /></Link>}
+            {!isAdmin && !isSeller && <Link to="/cart" aria-label={`Cart, ${itemCount} items`} title="Cart" className="relative hidden h-10 w-10 items-center justify-center rounded-xl text-slate-700 transition hover:bg-slate-100 lg:inline-flex">
               <ShoppingCart size={19} />
               {itemCount > 0 && <span className="absolute right-0 top-0 flex h-[18px] min-w-[18px] -translate-y-1/4 translate-x-1/4 items-center justify-center rounded-full bg-indigo-700 px-1 text-[10px] font-bold text-white">{itemCount}</span>}
             </Link>}
             {!user ? <div className="hidden items-center gap-2 lg:flex"><Link to="/login" className="btn btn-secondary px-3 py-2">Login</Link><Link to="/register" className="btn btn-primary px-3 py-2">Register</Link></div> : (
               <div className="relative hidden lg:block">
-                <button type="button" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)} className="inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"><UserRound size={17} /><span>{isAdmin ? 'Admin' : 'Account'}</span></button>
-                {profileOpen && <div className="absolute right-0 top-12 z-50 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-xl"><p className="truncate px-3 py-2 text-xs text-slate-500">{user.name || user.email}</p><Link onClick={() => setProfileOpen(false)} to={isAdmin ? '/admin' : '/profile'} className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">{isAdmin ? 'Admin dashboard' : 'My profile'}</Link>{!isAdmin && <Link onClick={() => setProfileOpen(false)} to="/wallet" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"><WalletCards size={15} />Refund wallet</Link>}<Link onClick={() => setProfileOpen(false)} to="/orders" className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Orders</Link><button type="button" onClick={() => { setProfileOpen(false); handleLogout(); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50"><LogOut size={15} />Log out</button></div>}
+                <button type="button" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)} className="inline-flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"><UserRound size={17} /><span>{isAdmin ? 'Admin' : isSeller ? 'Seller Account' : 'Account'}</span></button>
+                {profileOpen && <div className="absolute right-0 top-12 z-50 w-52 rounded-xl border border-slate-200 bg-white p-2 shadow-xl"><p className="truncate px-3 py-2 text-xs text-slate-500">{user.name || user.email}</p><Link onClick={() => setProfileOpen(false)} to={isAdmin ? '/admin' : '/profile'} className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">{isAdmin ? 'Admin dashboard' : 'My profile'}</Link>{isSeller && <Link onClick={() => setProfileOpen(false)} to="/seller/dashboard" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"><Store size={15} />Seller Hub</Link>}{!isAdmin && !isSeller && <Link onClick={() => setProfileOpen(false)} to="/seller/register" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"><Store size={15} />Become a Seller</Link>}{!isAdmin && <Link onClick={() => setProfileOpen(false)} to="/wallet" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"><WalletCards size={15} />Refund wallet</Link>}<Link onClick={() => setProfileOpen(false)} to="/orders" className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Orders</Link><button type="button" onClick={() => { setProfileOpen(false); handleLogout(); }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50"><LogOut size={15} />Log out</button></div>}
               </div>
             )}
           </div>

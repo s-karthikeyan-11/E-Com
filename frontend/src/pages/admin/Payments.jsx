@@ -7,7 +7,7 @@ const STATUS_STYLES = {
   Pending: 'bg-amber-100 text-amber-700',
   Failed: 'bg-rose-100 text-rose-700',
 };
-const METHODS = ['Razorpay', 'UPI', 'Credit/Debit Card', 'Net Banking', 'Cash on Delivery'];
+const METHODS = ['Razorpay', 'UPI', 'Credit/Debit Card', 'Net Banking', 'Wallet', 'Cash on Delivery'];
 
 const AdminPayments = () => {
   const [data, setData] = useState(null);

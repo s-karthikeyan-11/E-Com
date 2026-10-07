@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const Product = require('../models/Product');
 const Order = require('../models/Order');
+const Seller = require('../models/Seller');
+const SellerTransaction = require('../models/SellerTransaction');
 
 const errorStatus = (err) => (err.name === 'ValidationError' || err.name === 'CastError' ? 400 : 500);
 
@@ -79,6 +81,89 @@ exports.deleteUser = async (req, res) => {
     res.json({ message: 'User deleted' });
   } catch (err) {
     res.status(errorStatus(err)).json({ message: 'Failed to delete user' });
+  }
+};
+
+// GET /api/admin/sellers?status=&search=
+exports.getSellers = async (req, res) => {
+  try {
+    const { status, search } = req.query;
+    const filter = {};
+    if (status && ['Pending', 'Approved', 'Rejected', 'Suspended'].includes(status)) {
+      filter.status = status;
+    }
+    if (search) {
+      const searchRegex = new RegExp(search.trim(), 'i');
+      filter.$or = [
+        { storeName: searchRegex },
+        { name: searchRegex },
+        { email: searchRegex },
+      ];
+    }
+    const sellers = await Seller.find(filter)
+      .populate('user', 'isBlocked createdAt')
+      .sort({ createdAt: -1 });
+
+    const sellersWithCounts = await Promise.all(
+      sellers.map(async (s) => {
+        const productCount = await Product.countDocuments({ seller: s._id });
+        return {
+          ...s.toObject(),
+          productCount,
+        };
+      })
+    );
+
+    res.json(sellersWithCounts);
+  } catch (err) {
+    res.status(errorStatus(err)).json({ message: 'Failed to fetch sellers' });
+  }
+};
+
+// GET /api/admin/sellers/:id
+exports.getSellerById = async (req, res) => {
+  try {
+    const seller = await Seller.findById(req.params.id).populate('user', 'name email isBlocked createdAt');
+    if (!seller) return res.status(404).json({ message: 'Seller not found' });
+
+    const [products, orders, transactions] = await Promise.all([
+      Product.find({ seller: seller._id }).sort({ createdAt: -1 }),
+      Order.find({ 'items.seller': seller._id }).sort({ createdAt: -1 }).limit(20),
+      SellerTransaction.find({ seller: seller._id }).sort({ createdAt: -1 }).limit(20),
+    ]);
+
+    res.json({
+      seller,
+      products,
+      orders,
+      transactions,
+    });
+  } catch (err) {
+    res.status(errorStatus(err)).json({ message: 'Failed to fetch seller details' });
+  }
+};
+
+// PUT /api/admin/sellers/:id/status  { status, rejectionReason, commissionRate }
+exports.updateSellerStatus = async (req, res) => {
+  try {
+    const { status, rejectionReason, commissionRate } = req.body;
+    if (!['Pending', 'Approved', 'Rejected', 'Suspended'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid seller status' });
+    }
+
+    const seller = await Seller.findById(req.params.id);
+    if (!seller) return res.status(404).json({ message: 'Seller not found' });
+
+    seller.status = status;
+    if (rejectionReason !== undefined) seller.rejectionReason = rejectionReason;
+    if (commissionRate != null && Number.isFinite(Number(commissionRate))) {
+      seller.commissionRate = Number(commissionRate);
+    }
+
+    await seller.save();
+    res.json(seller);
+  } catch (err) {
+    res.status(errorStatus(err)).json({ message: 'Failed to update seller status' });
   }
 };
 
@@ -902,8 +987,8 @@ exports.getReports = async (req, res) => {
         outOfStock: inventory[0]?.outOfStock || [],
       },
       sellers: {
-        available: false,
-        note: 'This project has no seller role, product owner, seller application, commission, or payout records. Seller reporting will remain unavailable until those source records exist.',
+        available: true,
+        note: 'Active multi-seller marketplace enabled.',
       },
       orderHistory: {
         items: orderItems,
