@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, Link, useNavigate } from 'react-router-dom';
 import {
+  BarChart3,
   Boxes,
   CircleDollarSign,
   ExternalLink,
@@ -20,6 +21,7 @@ const navItems = [
   { to: '/seller/products', label: 'Products', icon: Boxes },
   { to: '/seller/orders', label: 'Orders', icon: Package },
   { to: '/seller/earnings', label: 'Earnings', icon: CircleDollarSign },
+  { to: '/seller/reports', label: 'Reports', icon: BarChart3 },
   { to: '/seller/profile', label: 'Store Profile', icon: Settings },
 ];
 

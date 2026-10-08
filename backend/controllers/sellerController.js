@@ -395,15 +395,15 @@ exports.getSellerDashboard = async (req, res) => {
   try {
     const sellerId = req.seller._id;
 
-    const [totalProducts, lowStockProducts, sellerOrders, recentOrders] = await Promise.all([
+    const [totalProducts, allProducts, sellerOrders] = await Promise.all([
       Product.countDocuments({ seller: sellerId, isActive: true }),
-      Product.countDocuments({ seller: sellerId, isActive: true, $expr: { $lte: ['$stock', '$lowStockThreshold'] } }),
-      Order.find({ 'items.seller': sellerId }),
-      Order.find({ 'items.seller': sellerId })
-        .sort({ createdAt: -1 })
-        .limit(5)
-        .select('items totalAmount paymentMethod paymentStatus status createdAt shippingAddress'),
+      Product.find({ seller: sellerId, isActive: true }).select('stock lowStockThreshold'),
+      Order.find({ 'items.seller': sellerId }).sort({ createdAt: -1 }),
     ]);
+
+    const lowStockProducts = allProducts.filter(
+      (p) => (p.stock || 0) <= (p.lowStockThreshold || 5)
+    ).length;
 
     let totalItemsSold = 0;
     let pendingOrdersCount = 0;
@@ -412,7 +412,7 @@ exports.getSellerDashboard = async (req, res) => {
     for (const order of sellerOrders) {
       const relevantItems = (order.items || []).filter((i) => i.seller && i.seller.toString() === sellerId.toString());
       for (const item of relevantItems) {
-        totalItemsSold += item.quantity;
+        totalItemsSold += item.quantity || 1;
         totalSalesCalculated += Number(item.lineTotal || 0);
         if (['Pending', 'Confirmed', 'Packed'].includes(item.sellerStatus || order.status)) {
           pendingOrdersCount++;
@@ -424,11 +424,27 @@ exports.getSellerDashboard = async (req, res) => {
     const totalCommission = +(totalSalesCalculated * (commissionRate / 100)).toFixed(2);
     const netEarnings = +(totalSalesCalculated - totalCommission).toFixed(2);
 
+    const recentOrders = sellerOrders.slice(0, 5).map((o) => {
+      const sellerSpecificItems = (o.items || []).filter((i) => i.seller && i.seller.toString() === sellerId.toString());
+      const sellerSubtotal = sellerSpecificItems.reduce((acc, i) => acc + Number(i.lineTotal || 0), 0);
+      return {
+        _id: o._id,
+        createdAt: o.createdAt,
+        paymentMethod: o.paymentMethod || 'Online',
+        paymentStatus: o.paymentStatus || 'Pending',
+        status: o.status || 'Pending',
+        itemsCount: sellerSpecificItems.length,
+        items: sellerSpecificItems,
+        sellerSubtotal: +sellerSubtotal.toFixed(2),
+        customerCity: o.shippingAddress?.city || 'N/A',
+      };
+    });
+
     res.json({
       seller: {
         _id: req.seller._id,
         storeName: req.seller.storeName,
-        rating: req.seller.rating,
+        rating: req.seller.rating || 4.8,
         commissionRate,
       },
       stats: {
@@ -441,21 +457,7 @@ exports.getSellerDashboard = async (req, res) => {
         totalCommission,
         netEarnings,
       },
-      recentOrders: recentOrders.map((o) => {
-        const sellerSpecificItems = o.items.filter((i) => i.seller && i.seller.toString() === sellerId.toString());
-        const sellerSubtotal = sellerSpecificItems.reduce((acc, i) => acc + Number(i.lineTotal || 0), 0);
-        return {
-          _id: o._id,
-          createdAt: o.createdAt,
-          paymentMethod: o.paymentMethod,
-          paymentStatus: o.paymentStatus,
-          status: o.status,
-          itemsCount: sellerSpecificItems.length,
-          items: sellerSpecificItems,
-          sellerSubtotal: +sellerSubtotal.toFixed(2),
-          customerCity: o.shippingAddress?.city,
-        };
-      }),
+      recentOrders,
     });
   } catch (err) {
     console.error('Seller dashboard error:', err);
@@ -490,8 +492,18 @@ exports.createSellerProduct = async (req, res) => {
       deliveryDays = 4,
     } = req.body;
 
-    if (!name || price == null || stock == null) {
-      return res.status(400).json({ message: 'Product name, price, and stock are required' });
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Product title is required' });
+    }
+
+    const numPrice = Number(price);
+    if (price === '' || price == null || isNaN(numPrice) || numPrice < 0) {
+      return res.status(400).json({ message: 'A valid product price is required' });
+    }
+
+    const numStock = Number(stock);
+    if (stock === '' || stock == null || isNaN(numStock) || numStock < 0) {
+      return res.status(400).json({ message: 'A valid stock quantity is required' });
     }
 
     const product = await Product.create({
@@ -500,11 +512,11 @@ exports.createSellerProduct = async (req, res) => {
       category: category ? category.trim() : 'General',
       seller: req.seller._id,
       image: image || '',
-      price: Number(price),
-      costPrice: costPrice != null ? Number(costPrice) : undefined,
+      price: numPrice,
+      costPrice: costPrice !== '' && costPrice != null && !isNaN(Number(costPrice)) ? Number(costPrice) : undefined,
       discountPercent: Number(discountPercent) || 0,
       gstPercent: Number(gstPercent) || 0,
-      stock: Number(stock) || 0,
+      stock: numStock,
       lowStockThreshold: Number(lowStockThreshold) || 5,
       deliveryDays: Number(deliveryDays) || 4,
       isActive: true,
@@ -513,7 +525,9 @@ exports.createSellerProduct = async (req, res) => {
     res.status(201).json(product);
   } catch (err) {
     console.error('Create seller product error:', err);
-    res.status(500).json({ message: 'Failed to create product' });
+    res.status(err.name === 'ValidationError' ? 400 : 500).json({
+      message: err.message || 'Failed to create product',
+    });
   }
 };
 
@@ -728,5 +742,153 @@ exports.getPublicSellerStore = async (req, res) => {
   } catch (err) {
     console.error('Store fetch error:', err);
     res.status(500).json({ message: 'Failed to fetch seller store' });
+  }
+};
+
+// GET /api/seller/reports?from=YYYY-MM-DD&to=YYYY-MM-DD
+exports.getSellerReports = async (req, res) => {
+  try {
+    const sellerId = req.seller._id;
+    const { from, to } = req.query;
+
+    const fromDate = from ? new Date(`${from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const toDate = to ? new Date(`${to}T23:59:59.999Z`) : new Date();
+
+    const dateFilter = { createdAt: mongoose.trusted({ $gte: fromDate, $lte: toDate }) };
+
+    const [products, allOrders, transactions, seller] = await Promise.all([
+      Product.find({ seller: sellerId }),
+      Order.find({ 'items.seller': sellerId, ...dateFilter }).sort({ createdAt: -1 }),
+      SellerTransaction.find({ seller: sellerId, ...dateFilter })
+        .populate('product', 'name price image category')
+        .populate('order', 'status paymentMethod paymentStatus createdAt')
+        .sort({ createdAt: -1 }),
+      Seller.findById(sellerId),
+    ]);
+
+    const commissionRate = seller.commissionRate || 10;
+
+    let grossSales = 0;
+    let unitsSold = 0;
+    let deliveredOrdersCount = 0;
+    let pendingOrdersCount = 0;
+    let cancelledOrdersCount = 0;
+
+    const dailyMap = new Map();
+    const categoryMap = new Map();
+    const productSalesMap = new Map();
+    const statusMap = {
+      Pending: 0,
+      Confirmed: 0,
+      Packed: 0,
+      Shipped: 0,
+      Delivered: 0,
+      Cancelled: 0,
+    };
+
+    for (const order of allOrders) {
+      const dayKey = order.createdAt.toISOString().slice(0, 10);
+      if (!dailyMap.has(dayKey)) {
+        dailyMap.set(dayKey, { date: dayKey, sales: 0, orders: 0, units: 0 });
+      }
+
+      const relevantItems = (order.items || []).filter(
+        (i) => i.seller && i.seller.toString() === sellerId.toString()
+      );
+
+      let orderItemTotal = 0;
+      let orderUnits = 0;
+
+      for (const item of relevantItems) {
+        const itemLineTotal = Number(item.lineTotal || 0);
+        orderItemTotal += itemLineTotal;
+        orderUnits += item.quantity || 1;
+        unitsSold += item.quantity || 1;
+        grossSales += itemLineTotal;
+
+        const cat = item.category || 'General';
+        categoryMap.set(cat, (categoryMap.get(cat) || 0) + itemLineTotal);
+
+        const pId = item.product ? item.product.toString() : item.name;
+        if (!productSalesMap.has(pId)) {
+          productSalesMap.set(pId, {
+            id: pId,
+            name: item.name,
+            units: 0,
+            revenue: 0,
+          });
+        }
+        const pStat = productSalesMap.get(pId);
+        pStat.units += item.quantity || 1;
+        pStat.revenue += itemLineTotal;
+
+        const itemStatus = item.sellerStatus || order.status;
+        if (statusMap[itemStatus] !== undefined) {
+          statusMap[itemStatus]++;
+        }
+      }
+
+      const dayRecord = dailyMap.get(dayKey);
+      dayRecord.sales += orderItemTotal;
+      dayRecord.orders += 1;
+      dayRecord.units += orderUnits;
+
+      if (order.status === 'Delivered') deliveredOrdersCount++;
+      else if (order.status === 'Cancelled') cancelledOrdersCount++;
+      else pendingOrdersCount++;
+    }
+
+    const totalCommission = +(grossSales * (commissionRate / 100)).toFixed(2);
+    const netEarnings = +(grossSales - totalCommission).toFixed(2);
+    const avgOrderValue = allOrders.length > 0 ? +(grossSales / allOrders.length).toFixed(2) : 0;
+
+    const dailyTrend = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+    const categoryBreakdown = Array.from(categoryMap.entries()).map(([category, revenue]) => ({
+      category,
+      revenue: +revenue.toFixed(2),
+      share: grossSales > 0 ? +((revenue / grossSales) * 100).toFixed(1) : 0,
+    })).sort((a, b) => b.revenue - a.revenue);
+
+    const topProducts = Array.from(productSalesMap.values())
+      .map((p) => ({
+        ...p,
+        revenue: +p.revenue.toFixed(2),
+      }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(10);
+
+    const totalInventoryCount = products.reduce((acc, p) => acc + (p.stock || 0), 0);
+    const lowStockCount = products.filter((p) => p.isActive && p.stock <= (p.lowStockThreshold || 5)).length;
+    const outOfStockCount = products.filter((p) => p.isActive && p.stock <= 0).length;
+
+    res.json({
+      summary: {
+        from: fromDate.toISOString().slice(0, 10),
+        to: toDate.toISOString().slice(0, 10),
+        grossSales: +grossSales.toFixed(2),
+        totalOrders: allOrders.length,
+        unitsSold,
+        commissionRate,
+        totalCommission,
+        netEarnings,
+        avgOrderValue,
+        deliveredOrders: deliveredOrdersCount,
+        pendingOrders: pendingOrdersCount,
+        cancelledOrders: cancelledOrdersCount,
+        totalProducts: products.length,
+        totalInventoryCount,
+        lowStockCount,
+        outOfStockCount,
+      },
+      dailyTrend,
+      categoryBreakdown,
+      topProducts,
+      statusBreakdown: statusMap,
+      transactions,
+    });
+  } catch (err) {
+    console.error('getSellerReports error:', err);
+    res.status(500).json({ message: 'Failed to generate seller report' });
   }
 };

@@ -3,6 +3,7 @@ import { Link, useOutletContext } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
+  BarChart3,
   Boxes,
   CircleDollarSign,
   Clock,
@@ -15,7 +16,8 @@ import api from '../../api/axios';
 import { fmtINR } from '../../utils/currency';
 
 const SellerDashboard = () => {
-  const { seller } = useOutletContext();
+  const outletContext = useOutletContext() || {};
+  const seller = outletContext.seller;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -108,13 +110,22 @@ const SellerDashboard = () => {
           <h2 className="text-xl font-bold text-slate-900 sm:text-2xl">Overview Dashboard</h2>
           <p className="text-xs text-slate-500">Live store performance and order fulfillment metrics</p>
         </div>
-        <Link
-          to="/seller/products"
-          className="btn btn-primary inline-flex items-center gap-2 self-start text-xs font-bold uppercase tracking-wider shadow-sm sm:self-auto"
-        >
-          <Plus size={16} />
-          <span>Add New Product</span>
-        </Link>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <Link
+            to="/seller/reports"
+            className="btn btn-secondary inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider"
+          >
+            <BarChart3 size={15} />
+            <span>Reports</span>
+          </Link>
+          <Link
+            to="/seller/products"
+            className="btn btn-primary inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider shadow-sm"
+          >
+            <Plus size={16} />
+            <span>Add Product</span>
+          </Link>
+        </div>
       </div>
 
       {/* 6 Key Flipkart Seller KPI Cards */}
@@ -198,13 +209,13 @@ const SellerDashboard = () => {
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="space-y-1">
-                        {order.items.slice(0, 2).map((item, idx) => (
+                        {(order.items || []).slice(0, 2).map((item, idx) => (
                           <div key={idx} className="text-xs font-medium text-slate-700">
                             {item.name} <span className="text-slate-400 font-semibold">×{item.quantity}</span>
                           </div>
                         ))}
-                        {order.items.length > 2 && (
-                          <span className="text-[10px] text-slate-400">+{order.items.length - 2} more</span>
+                        {(order.items || []).length > 2 && (
+                          <span className="text-[10px] text-slate-400">+{(order.items || []).length - 2} more</span>
                         )}
                       </div>
                     </td>

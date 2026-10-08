@@ -22,6 +22,15 @@ const {
   deleteProduct,
 } = require('../controllers/productController');
 const { adminGetOrders, updateOrderStatus, getOrderById } = require('../controllers/orderController');
+const {
+  getDeliveryPartners,
+  getDeliveryPartnerById,
+  createDeliveryPartner,
+  updateDeliveryPartner,
+  toggleDeliveryPartnerStatus,
+  assignOrderDelivery,
+  getAllShipments,
+} = require('../controllers/adminDeliveryController');
 
 router.use(protect, adminOnly); // every admin route requires an admin JWT
 
@@ -36,6 +45,15 @@ router.get('/reports', getReports);
 router.get('/sellers', getSellers);
 router.get('/sellers/:id', getSellerById);
 router.put('/sellers/:id/status', updateSellerStatus);
+
+// Logistics & Delivery Partner Management routes
+router.get('/delivery-partners', getDeliveryPartners);
+router.get('/delivery-partners/:id', getDeliveryPartnerById);
+router.post('/delivery-partners', createDeliveryPartner);
+router.put('/delivery-partners/:id', updateDeliveryPartner);
+router.put('/delivery-partners/:id/status', toggleDeliveryPartnerStatus);
+router.post('/orders/:id/assign-delivery', assignOrderDelivery);
+router.get('/shipments', getAllShipments);
 
 router.get('/products', adminGetProducts);
 router.post('/products', createProduct);

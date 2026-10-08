@@ -65,9 +65,32 @@ const sellerOnly = async (req, res, next) => {
   next();
 };
 
+const DeliveryPartner = require('../models/DeliveryPartner');
+
+const deliveryOnly = async (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Not authorized' });
+  }
+  if (req.user.role !== 'delivery' && req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Delivery partner access required' });
+  }
+  const partner = await DeliveryPartner.findOne({ user: req.user._id });
+  if (!partner && req.user.role !== 'admin') {
+    return res.status(404).json({ message: 'Delivery partner profile not found' });
+  }
+  if (partner && partner.status === 'Inactive') {
+    return res.status(403).json({ message: 'Your delivery partner account is inactive. Please contact admin.' });
+  }
+  if (partner && partner.status === 'Suspended') {
+    return res.status(403).json({ message: 'Your delivery partner account has been suspended by the admin.' });
+  }
+  req.deliveryPartner = partner;
+  next();
+};
+
 const customerOnly = (req, res, next) => {
   if (req.user && req.user.role !== 'admin') return next();
   return res.status(403).json({ message: 'Only customers can place orders' });
 };
 
-module.exports = { protect, adminOnly, sellerOnly, customerOnly };
+module.exports = { protect, adminOnly, sellerOnly, customerOnly, deliveryOnly };

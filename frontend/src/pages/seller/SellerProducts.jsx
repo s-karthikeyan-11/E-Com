@@ -38,6 +38,7 @@ const SellerProducts = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  const [modalError, setModalError] = useState('');
 
   // Modal / Form state
   const [showModal, setShowModal] = useState(false);
@@ -61,11 +62,13 @@ const SellerProducts = () => {
   const openAddModal = () => {
     setEditingId(null);
     setFormData(emptyProductForm);
+    setModalError('');
     setShowModal(true);
   };
 
   const openEditModal = (p) => {
     setEditingId(p._id);
+    setModalError('');
     setFormData({
       name: p.name || '',
       description: p.description || '',
@@ -85,12 +88,18 @@ const SellerProducts = () => {
   const handleFormChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    if (modalError) setModalError('');
   };
 
   // Image upload simulation or URL
   const handleImageUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 4 * 1024 * 1024) {
+        setModalError('Image is too large (maximum 4MB). Please choose a smaller image.');
+        return;
+      }
+      setModalError('');
       const reader = new FileReader();
       reader.onloadend = () => {
         setFormData((prev) => ({ ...prev, image: reader.result }));
@@ -103,18 +112,33 @@ const SellerProducts = () => {
     e.preventDefault();
     setSaving(true);
     setError('');
+    setModalError('');
 
     try {
+      const numPrice = Number(formData.price);
+      if (formData.price === '' || isNaN(numPrice) || numPrice < 0) {
+        setModalError('Please enter a valid base price.');
+        setSaving(false);
+        return;
+      }
+
+      const numStock = Number(formData.stock);
+      if (formData.stock === '' || isNaN(numStock) || numStock < 0) {
+        setModalError('Please enter a valid stock quantity.');
+        setSaving(false);
+        return;
+      }
+
       const payload = {
         name: formData.name.trim(),
         description: formData.description.trim(),
         category: formData.category,
         image: formData.image,
-        price: Number(formData.price),
+        price: numPrice,
         costPrice: formData.costPrice ? Number(formData.costPrice) : undefined,
         discountPercent: Number(formData.discountPercent) || 0,
         gstPercent: Number(formData.gstPercent) || 0,
-        stock: Number(formData.stock) || 0,
+        stock: numStock,
         lowStockThreshold: Number(formData.lowStockThreshold) || 5,
         deliveryDays: Number(formData.deliveryDays) || 4,
       };
@@ -128,7 +152,7 @@ const SellerProducts = () => {
       setShowModal(false);
       loadProducts();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to save product');
+      setModalError(err.response?.data?.message || 'Failed to save product');
     } finally {
       setSaving(false);
     }
@@ -332,6 +356,13 @@ const SellerProducts = () => {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+              {modalError && (
+                <div className="rounded-xl bg-rose-50 border border-rose-200 p-3 text-xs text-rose-700 flex items-center gap-2 animate-fadeIn">
+                  <AlertCircle size={16} className="shrink-0 text-rose-600" />
+                  <span className="font-medium">{modalError}</span>
+                </div>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
@@ -404,13 +435,22 @@ const SellerProducts = () => {
                     </label>
                   </div>
                   {formData.image && (
-                    <div className="mt-2.5 flex items-center gap-3">
-                      <img
-                        src={formData.image}
-                        alt="Preview"
-                        className="h-16 w-16 rounded-xl object-cover border border-slate-200"
-                      />
-                      <span className="text-xs text-slate-500 font-medium">Image preview loaded</span>
+                    <div className="mt-2.5 flex items-center justify-between rounded-xl bg-slate-50 border border-slate-200/80 p-2 pr-3">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={formData.image}
+                          alt="Preview"
+                          className="h-12 w-12 rounded-lg object-cover border border-slate-200"
+                        />
+                        <span className="text-xs text-slate-600 font-medium">Image preview loaded</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setFormData((prev) => ({ ...prev, image: '' }))}
+                        className="text-xs font-semibold text-rose-600 hover:text-rose-700"
+                      >
+                        Remove
+                      </button>
                     </div>
                   )}
                 </div>

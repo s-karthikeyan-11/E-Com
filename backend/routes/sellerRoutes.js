@@ -14,6 +14,7 @@ const {
   getSellerOrders,
   updateSellerOrderStatus,
   getSellerEarnings,
+  getSellerReports,
   getPublicSellerStore,
 } = require('../controllers/sellerController');
 
@@ -40,5 +41,6 @@ router.get('/orders', getSellerOrders);
 router.put('/orders/:id/status', updateSellerOrderStatus);
 
 router.get('/earnings', getSellerEarnings);
+router.get('/reports', getSellerReports);
 
 module.exports = router;

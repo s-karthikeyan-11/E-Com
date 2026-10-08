@@ -24,7 +24,7 @@ const userSchema = new mongoose.Schema(
       match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email address'],
     },
     password: { type: String, required: true, minlength: 8 },
-    role: { type: String, enum: ['user', 'seller', 'admin'], default: 'user' },
+    role: { type: String, enum: ['user', 'seller', 'admin', 'delivery'], default: 'user' },
     isBlocked: { type: Boolean, default: false },
     // Prevents the same account from submitting its cart twice concurrently.
     // It is cleared after checkout and can be reclaimed after a short timeout.

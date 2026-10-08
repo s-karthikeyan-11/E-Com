@@ -17,9 +17,17 @@ const PAYMENT_METHODS = ['Cash on Delivery'];
 const CHECKOUT_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 const STATUS_TRANSITIONS = {
   'Awaiting Payment': ['Cancelled'],
-  Pending: ['Processing', 'Cancelled'],
-  Processing: ['Shipped', 'Cancelled'],
-  Shipped: ['Delivered', 'Cancelled'],
+  Pending: ['Confirmed', 'Processing', 'Packed', 'Cancelled'],
+  Confirmed: ['Packed', 'Processing', 'Shipped', 'Picked Up', 'Cancelled'],
+  Packed: ['Shipped', 'Picked Up', 'Cancelled'],
+  Processing: ['Packed', 'Shipped', 'Picked Up', 'Cancelled'],
+  Shipped: ['Picked Up', 'In Transit', 'Out for Delivery', 'Delivered', 'Cancelled'],
+  'Picked Up': ['In Transit', 'Out for Delivery', 'Failed Delivery', 'Cancelled'],
+  'In Transit': ['Out for Delivery', 'Delivered', 'Failed Delivery', 'RTO Initiated', 'Cancelled'],
+  'Out for Delivery': ['Delivered', 'Failed Delivery', 'RTO Initiated'],
+  'Failed Delivery': ['Out for Delivery', 'RTO Initiated'],
+  'RTO Initiated': ['RTO Delivered'],
+  'RTO Delivered': [],
   Delivered: [],
   Cancelled: [],
 };
@@ -692,20 +700,26 @@ exports.recordRazorpayPaymentFailure = async (req, res) => {
 // GET /api/orders  -- current user's order history
 exports.getMyOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ user: req.user._id }).sort({ createdAt: -1 });
+    const orders = await Order.find({ user: req.user._id })
+      .populate('deliveryPartner', 'name phone email serviceType rating')
+      .populate('shipment')
+      .sort({ createdAt: -1 });
     res.json(orders);
   } catch (err) {
     res.status(errorStatus(err)).json({ message: 'Failed to fetch orders' });
   }
 };
 
-// GET /api/orders/:id -- single order (owner or admin)
+// GET /api/orders/:id -- single order (owner, admin, or assigned delivery partner)
 exports.getOrderById = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id).populate('user', 'name email');
+    const order = await Order.findById(req.params.id)
+      .populate('user', 'name email')
+      .populate('deliveryPartner', 'name phone email serviceType vehicleType vehicleNumber rating')
+      .populate('shipment');
     if (!order) return res.status(404).json({ message: 'Order not found' });
     const isOwner = order.user && order.user._id.toString() === req.user._id.toString();
-    if (!isOwner && req.user.role !== 'admin') {
+    if (!isOwner && req.user.role !== 'admin' && req.user.role !== 'delivery') {
       return res.status(403).json({ message: 'Not authorized to view this order' });
     }
     res.json(order);
@@ -724,7 +738,11 @@ exports.adminGetOrders = async (req, res) => {
       return res.status(400).json({ message: 'Invalid status filter' });
     }
     const filter = status ? { status } : {};
-    const orders = await Order.find(filter).populate('user', 'name email').sort({ createdAt: -1 });
+    const orders = await Order.find(filter)
+      .populate('user', 'name email')
+      .populate('deliveryPartner', 'name phone serviceType status')
+      .populate('shipment')
+      .sort({ createdAt: -1 });
     res.json(orders);
   } catch (err) {
     res.status(errorStatus(err)).json({ message: 'Failed to fetch orders' });

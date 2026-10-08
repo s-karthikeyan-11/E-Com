@@ -23,6 +23,14 @@ import AdminUsers from './pages/admin/Users';
 import AdminPayments from './pages/admin/Payments';
 import AdminReports from './pages/admin/Reports';
 import AdminSellers from './pages/admin/Sellers';
+import AdminDeliveryPartners from './pages/admin/DeliveryPartners';
+
+import DeliveryRoute from './components/DeliveryRoute';
+import DeliveryLayout from './pages/delivery/DeliveryLayout';
+import DeliveryLogin from './pages/delivery/DeliveryLogin';
+import DeliveryDashboard from './pages/delivery/DeliveryDashboard';
+import DeliveryOrders from './pages/delivery/DeliveryOrders';
+import DeliveryHistory from './pages/delivery/DeliveryHistory';
 
 import SellerRoute from './components/SellerRoute';
 import SellerLayout from './pages/seller/SellerLayout';
@@ -33,6 +41,7 @@ import SellerProducts from './pages/seller/SellerProducts';
 import SellerOrders from './pages/seller/SellerOrders';
 import SellerEarnings from './pages/seller/SellerEarnings';
 import SellerProfile from './pages/seller/SellerProfile';
+import SellerReports from './pages/seller/SellerReports';
 import SellerStore from './pages/seller/SellerStore';
 
 import Checkout from './pages/Checkout';
@@ -117,7 +126,24 @@ const App = () => (
                 <Route path="products" element={<SellerProducts />} />
                 <Route path="orders" element={<SellerOrders />} />
                 <Route path="earnings" element={<SellerEarnings />} />
+                <Route path="reports" element={<SellerReports />} />
                 <Route path="profile" element={<SellerProfile />} />
+              </Route>
+
+              {/* Delivery Partner Portal */}
+              <Route path="/delivery/login" element={<DeliveryLogin />} />
+              <Route
+                path="/delivery"
+                element={
+                  <DeliveryRoute>
+                    <DeliveryLayout />
+                  </DeliveryRoute>
+                }
+              >
+                <Route index element={<Navigate to="/delivery/dashboard" replace />} />
+                <Route path="dashboard" element={<DeliveryDashboard />} />
+                <Route path="orders" element={<DeliveryOrders />} />
+                <Route path="history" element={<DeliveryHistory />} />
               </Route>
 
               {/* Customer Protected Pages */}
@@ -220,6 +246,11 @@ const App = () => (
                 <Route
                   path="orders"
                   element={<AdminOrders />}
+                />
+
+                <Route
+                  path="delivery-partners"
+                  element={<AdminDeliveryPartners />}
                 />
 
                 <Route

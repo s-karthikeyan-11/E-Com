@@ -15,6 +15,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const addressRoutes = require('./routes/addressRoutes');
 const sellerRoutes = require('./routes/sellerRoutes');
+const deliveryRoutes = require('./routes/deliveryRoutes');
 
 const app = express();
 const configuredClientOrigins = getClientOrigins();
@@ -72,6 +73,7 @@ app.use('/api/addresses', addressRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/seller', sellerRoutes);
 app.use('/api/sellers', sellerRoutes);
+app.use('/api/delivery', deliveryRoutes);
 
 // 404 handler
 app.use((req, res) => res.status(404).json({ message: 'Route not found' }));
