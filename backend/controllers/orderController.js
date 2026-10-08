@@ -175,7 +175,7 @@ const resolveCoupon = async (userId, itemTotal, required) => {
 
 const getCheckoutDetails = async (userId, applyCoupon = false) => {
   // Cost is server-only, but is snapshotted onto the order for profit reporting.
-  const user = await User.findById(userId).populate({ path: 'cart.product', select: '+costPrice seller' });
+  const user = await User.findById(userId).populate({ path: 'cart.product', select: '+costPrice' });
   if (!user) throw httpError(401, 'User no longer exists');
   if (!user.cart.length) throw httpError(400, 'Cart is empty');
 

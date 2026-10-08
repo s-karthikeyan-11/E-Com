@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
   Building2,
   CheckCircle2,
   Clock,
+  Info,
   Mail,
   MapPin,
   Phone,
@@ -13,21 +14,38 @@ import {
   User,
 } from 'lucide-react';
 import api from '../../api/axios';
+import { useAuth } from '../../context/AuthContext';
 
 const SellerRegister = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
+    name: user?.name || '',
+    email: user?.email || '',
     password: '',
-    phone: '',
+    phone: user?.addresses?.[0]?.phone || '',
     storeName: '',
     storeDescription: '',
-    line1: '',
-    city: '',
-    state: '',
-    pincode: '',
+    line1: user?.addresses?.[0]?.line1 || '',
+    city: user?.addresses?.[0]?.city || '',
+    state: user?.addresses?.[0]?.state || '',
+    pincode: user?.addresses?.[0]?.pincode || '',
   });
+
+  useEffect(() => {
+    if (user) {
+      setFormData((prev) => ({
+        ...prev,
+        name: prev.name || user.name || '',
+        email: prev.email || user.email || '',
+        phone: prev.phone || user.addresses?.[0]?.phone || '',
+        line1: prev.line1 || user.addresses?.[0]?.line1 || '',
+        city: prev.city || user.addresses?.[0]?.city || '',
+        state: prev.state || user.addresses?.[0]?.state || '',
+        pincode: prev.pincode || user.addresses?.[0]?.pincode || '',
+      }));
+    }
+  }, [user]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -116,6 +134,18 @@ const SellerRegister = () => {
         </div>
 
         <div className="card p-6 sm:p-10 shadow-soft">
+          {user && (
+            <div className="mb-6 flex items-start gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/70 p-4 text-xs text-indigo-900">
+              <Info size={18} className="shrink-0 text-indigo-600 mt-0.5" />
+              <div>
+                <p className="font-bold">Registering as a Seller Partner</p>
+                <p className="mt-0.5 text-indigo-700">
+                  You are registering with your account <strong className="text-indigo-950 font-semibold">{user.email}</strong>. Enter your account password below to confirm ownership and submit your store application.
+                </p>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div role="alert" className="mb-6 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
               <AlertCircle size={18} className="shrink-0 text-rose-600 mt-0.5" />
@@ -154,17 +184,22 @@ const SellerRegister = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">Password *</label>
+                  <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
+                    Password *
+                  </label>
                   <input
                     type="password"
                     name="password"
                     className="input"
-                    placeholder="Min. 8 characters"
+                    placeholder={user ? "Enter your account password" : "Min. 8 characters"}
                     value={formData.password}
                     onChange={handleChange}
                     minLength={8}
                     required
                   />
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {user ? 'Enter your existing account password to authorize.' : 'Existing customers can enter their account password to upgrade.'}
+                  </p>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">Phone Number *</label>

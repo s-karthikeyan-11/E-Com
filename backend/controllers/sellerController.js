@@ -112,16 +112,121 @@ exports.registerSeller = async (req, res) => {
       return res.status(400).json({ message: 'Complete street, city, state, and pincode are required for store address' });
     }
 
-    const existingEmail = await User.findOne({ email: normalizedEmail });
-    if (existingEmail) {
-      return res.status(409).json({ message: 'Email is already registered. Please login or use another email.' });
-    }
+    // Check store name uniqueness
+    const existingStore = await Seller.findOne({
+      storeName: new RegExp(`^${storeName.trim()}$`, 'i'),
+    });
 
-    const existingStore = await Seller.findOne({ storeName: new RegExp(`^${storeName.trim()}$`, 'i') });
-    if (existingStore) {
+    const existingUser = await User.findOne({ email: normalizedEmail });
+
+    if (existingStore && (!existingUser || existingStore.user?.toString() !== existingUser._id?.toString())) {
       return res.status(409).json({ message: 'This store name is already taken. Please choose another store name.' });
     }
 
+    if (existingUser) {
+      if (existingUser.role === 'admin') {
+        return res.status(403).json({ message: 'Admin accounts cannot be registered as sellers' });
+      }
+
+      // Check if user already has an existing seller profile
+      const existingSeller = await Seller.findOne({ user: existingUser._id });
+      if (existingSeller) {
+        if (existingSeller.status === 'Approved') {
+          return res.status(409).json({
+            message: 'Your account is already an approved seller. Please log in directly to the Seller Hub.',
+            sellerStatus: 'Approved',
+          });
+        }
+        if (existingSeller.status === 'Pending') {
+          return res.status(409).json({
+            message: 'A seller application for this account has already been submitted and is pending admin approval.',
+            sellerStatus: 'Pending',
+          });
+        }
+        if (existingSeller.status === 'Suspended') {
+          return res.status(403).json({
+            message: 'Your seller account has been suspended by the administrator. Please contact support.',
+            sellerStatus: 'Suspended',
+          });
+        }
+        if (existingSeller.status === 'Rejected') {
+          // Verify password to allow re-submission
+          const isMatch = await existingUser.comparePassword(password);
+          if (!isMatch) {
+            return res.status(401).json({
+              message: 'Incorrect password for this account. Please enter your valid account password to update and resubmit your application.',
+            });
+          }
+
+          existingSeller.name = name.trim();
+          existingSeller.phone = phone.trim();
+          existingSeller.storeName = storeName.trim();
+          existingSeller.storeDescription = storeDescription ? storeDescription.trim() : '';
+          existingSeller.storeAddress = {
+            line1: line1.trim(),
+            city: city.trim(),
+            state: state.trim(),
+            pincode: pincode.trim(),
+          };
+          existingSeller.status = 'Pending';
+          existingSeller.rejectionReason = '';
+          await existingSeller.save();
+
+          return res.status(200).json({
+            message: 'Seller application updated and resubmitted successfully! It is now pending admin approval.',
+            seller: {
+              _id: existingSeller._id,
+              storeName: existingSeller.storeName,
+              status: existingSeller.status,
+              email: existingSeller.email,
+            },
+            user: existingUser.toSafeObject(),
+          });
+        }
+      }
+
+      // Existing customer upgrading to seller
+      const isMatch = await existingUser.comparePassword(password);
+      if (!isMatch) {
+        return res.status(401).json({
+          message: 'This email is registered to an existing customer account. Please enter your account password to verify ownership and register as a seller.',
+        });
+      }
+
+      // Upgrade user role to seller
+      existingUser.role = 'seller';
+      if (name && name.trim()) existingUser.name = name.trim();
+      await existingUser.save();
+
+      const seller = await Seller.create({
+        user: existingUser._id,
+        name: existingUser.name,
+        email: normalizedEmail,
+        phone: phone.trim(),
+        storeName: storeName.trim(),
+        storeDescription: storeDescription ? storeDescription.trim() : '',
+        storeAddress: {
+          line1: line1.trim(),
+          city: city.trim(),
+          state: state.trim(),
+          pincode: pincode.trim(),
+        },
+        status: 'Pending',
+      });
+
+      return res.status(201).json({
+        message: 'Seller application submitted successfully! Your account is pending admin approval.',
+        seller: {
+          _id: seller._id,
+          storeName: seller.storeName,
+          status: seller.status,
+          email: seller.email,
+        },
+        user: existingUser.toSafeObject(),
+      });
+    }
+
+    // Brand new user registration
     const user = await User.create({
       name: name.trim(),
       email: normalizedEmail,
@@ -592,6 +697,7 @@ exports.getSellerEarnings = async (req, res) => {
       transactions,
     });
   } catch (err) {
+    console.error('getSellerEarnings error:', err);
     res.status(500).json({ message: 'Failed to fetch earnings' });
   }
 };

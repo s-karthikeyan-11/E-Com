@@ -14,6 +14,12 @@ const sellerTransactionSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    product: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Product',
+      default: null,
+      index: true,
+    },
     type: {
       type: String,
       enum: ['Order Sale', 'Commission Deduction', 'Payout', 'Refund'],
