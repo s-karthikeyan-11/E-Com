@@ -47,6 +47,60 @@ const DeliveryRoute = ({ children }) => {
     return <Navigate to="/delivery/login" replace />;
   }
 
+  if (partner?.status === 'Pending') {
+    return (
+      <div className="section-shell py-16">
+        <div className="mx-auto max-w-lg rounded-3xl border border-amber-200 bg-white p-8 text-center shadow-soft">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 mb-4">
+            <Truck size={28} />
+          </div>
+          <span className="rounded-full bg-amber-100 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-amber-800">
+            Pending Admin Approval
+          </span>
+          <h2 className="mt-3 text-xl font-bold text-slate-900">Application Under Review</h2>
+          <p className="mt-2 text-xs text-slate-500 leading-relaxed">
+            Your delivery partner registration has been submitted and is awaiting administrator verification.
+            You will be granted access to the dispatch pipeline once approved.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (partner?.status === 'Rejected') {
+    return (
+      <div className="section-shell py-16">
+        <div className="mx-auto max-w-lg rounded-3xl border border-rose-200 bg-white p-8 text-center shadow-soft">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 mb-4">
+            <ShieldAlert size={28} />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900">Application Rejected</h2>
+          <p className="mt-2 text-xs text-slate-500 leading-relaxed">
+            {partner.rejectionReason
+              ? `Reason: ${partner.rejectionReason}`
+              : 'Your delivery partner application was not approved by the operations team.'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (partner?.status === 'Inactive') {
+    return (
+      <div className="section-shell py-16">
+        <div className="mx-auto max-w-lg rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-soft">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 mb-4">
+            <Truck size={28} />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900">Delivery Account Inactive</h2>
+          <p className="mt-2 text-xs text-slate-500 leading-relaxed">
+            Your delivery partner account is currently marked as inactive. Please contact your operations manager.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (partner?.status === 'Suspended') {
     return (
       <div className="section-shell py-16">

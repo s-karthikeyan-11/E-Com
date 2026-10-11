@@ -28,6 +28,8 @@ const {
   createDeliveryPartner,
   updateDeliveryPartner,
   toggleDeliveryPartnerStatus,
+  approveDeliveryPartner,
+  rejectDeliveryPartner,
   assignOrderDelivery,
   getAllShipments,
 } = require('../controllers/adminDeliveryController');
@@ -52,6 +54,8 @@ router.get('/delivery-partners/:id', getDeliveryPartnerById);
 router.post('/delivery-partners', createDeliveryPartner);
 router.put('/delivery-partners/:id', updateDeliveryPartner);
 router.put('/delivery-partners/:id/status', toggleDeliveryPartnerStatus);
+router.put('/delivery-partners/:id/approve', approveDeliveryPartner);
+router.put('/delivery-partners/:id/reject', rejectDeliveryPartner);
 router.post('/orders/:id/assign-delivery', assignOrderDelivery);
 router.get('/shipments', getAllShipments);
 

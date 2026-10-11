@@ -78,11 +78,30 @@ const deliveryOnly = async (req, res, next) => {
   if (!partner && req.user.role !== 'admin') {
     return res.status(404).json({ message: 'Delivery partner profile not found' });
   }
-  if (partner && partner.status === 'Inactive') {
-    return res.status(403).json({ message: 'Your delivery partner account is inactive. Please contact admin.' });
-  }
-  if (partner && partner.status === 'Suspended') {
-    return res.status(403).json({ message: 'Your delivery partner account has been suspended by the admin.' });
+  if (partner) {
+    if (partner.status === 'Pending') {
+      return res.status(403).json({
+        message: 'Your delivery partner registration is pending admin approval',
+        partnerStatus: 'Pending',
+      });
+    }
+    if (partner.status === 'Rejected') {
+      return res.status(403).json({
+        message: partner.rejectionReason
+          ? `Your delivery partner application was rejected: ${partner.rejectionReason}`
+          : 'Your delivery partner application was rejected by the admin',
+        partnerStatus: 'Rejected',
+      });
+    }
+    if (partner.status === 'Inactive') {
+      return res.status(403).json({ message: 'Your delivery partner account is inactive. Please contact admin.' });
+    }
+    if (partner.status === 'Suspended') {
+      return res.status(403).json({ message: 'Your delivery partner account has been suspended by the admin.' });
+    }
+    if (partner.status !== 'Active' && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Your delivery partner account is not active.' });
+    }
   }
   req.deliveryPartner = partner;
   next();

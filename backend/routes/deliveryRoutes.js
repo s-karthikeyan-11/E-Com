@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect, deliveryOnly } = require('../middleware/auth');
 const {
+  registerDeliveryPartner,
   loginDeliveryPartner,
   getDeliveryProfile,
   updateDeliveryProfile,
@@ -12,7 +13,8 @@ const {
   getDeliveryHistory,
 } = require('../controllers/deliveryController');
 
-// Public route: Delivery partner authentication
+// Public routes: Delivery partner onboarding and authentication
+router.post('/register', registerDeliveryPartner);
 router.post('/login', loginDeliveryPartner);
 
 // Protected routes (require delivery role or admin)

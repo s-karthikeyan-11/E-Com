@@ -17,7 +17,7 @@ exports.getDeliveryPartners = async (req, res) => {
   try {
     const { status, search } = req.query;
     const filter = {};
-    if (status && ['Active', 'Inactive', 'Suspended'].includes(status)) {
+    if (status && ['Pending', 'Active', 'Inactive', 'Suspended', 'Rejected'].includes(status)) {
       filter.status = status;
     }
     if (search) {
@@ -33,6 +33,7 @@ exports.getDeliveryPartners = async (req, res) => {
       .sort({ createdAt: -1 });
 
     const totalPartners = await DeliveryPartner.countDocuments();
+    const pendingPartners = await DeliveryPartner.countDocuments({ status: 'Pending' });
     const activePartners = await DeliveryPartner.countDocuments({ status: 'Active' });
     const inTransitShipments = await Shipment.countDocuments({
       status: mongoose.trusted({ $in: ['Picked Up', 'In Transit', 'Out for Delivery'] }),
@@ -43,6 +44,7 @@ exports.getDeliveryPartners = async (req, res) => {
       partners,
       summary: {
         totalPartners,
+        pendingPartners,
         activePartners,
         inTransitShipments,
         totalDelivered: deliveredCount,
@@ -202,14 +204,22 @@ exports.updateDeliveryPartner = async (req, res) => {
 // PUT /api/admin/delivery-partners/:id/status
 exports.toggleDeliveryPartnerStatus = async (req, res) => {
   try {
-    const { status } = req.body;
-    if (!['Active', 'Inactive', 'Suspended'].includes(status)) {
+    const { status, rejectionReason } = req.body;
+    if (!['Pending', 'Active', 'Inactive', 'Suspended', 'Rejected'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status' });
+    }
+
+    const update = { status };
+    if (rejectionReason !== undefined) {
+      update.rejectionReason = typeof rejectionReason === 'string' ? rejectionReason.trim() : '';
+    }
+    if (status === 'Active') {
+      update.rejectionReason = '';
     }
 
     const partner = await DeliveryPartner.findByIdAndUpdate(
       req.params.id,
-      { status },
+      update,
       { new: true }
     );
     if (!partner) {
@@ -218,7 +228,42 @@ exports.toggleDeliveryPartnerStatus = async (req, res) => {
 
     res.json(partner);
   } catch (err) {
-    res.status(500).json({ message: 'Failed to change status' });
+    res.status(500).json({ message: 'Failed to update partner status' });
+  }
+};
+
+// PUT /api/admin/delivery-partners/:id/approve
+exports.approveDeliveryPartner = async (req, res) => {
+  try {
+    const partner = await DeliveryPartner.findByIdAndUpdate(
+      req.params.id,
+      { status: 'Active', rejectionReason: '' },
+      { new: true }
+    );
+    if (!partner) {
+      return res.status(404).json({ message: 'Delivery partner not found' });
+    }
+    res.json({ message: 'Delivery partner approved successfully', partner });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to approve delivery partner' });
+  }
+};
+
+// PUT /api/admin/delivery-partners/:id/reject
+exports.rejectDeliveryPartner = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const partner = await DeliveryPartner.findByIdAndUpdate(
+      req.params.id,
+      { status: 'Rejected', rejectionReason: typeof reason === 'string' ? reason.trim() : '' },
+      { new: true }
+    );
+    if (!partner) {
+      return res.status(404).json({ message: 'Delivery partner not found' });
+    }
+    res.json({ message: 'Delivery partner application rejected', partner });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to reject delivery partner' });
   }
 };
 
@@ -244,13 +289,25 @@ exports.assignOrderDelivery = async (req, res) => {
       return res.status(404).json({ message: 'Delivery partner not found' });
     }
     if (partner.status !== 'Active') {
-      return res.status(400).json({ message: 'Cannot assign to an inactive or suspended delivery partner' });
+      return res.status(400).json({
+        message: partner.status === 'Pending'
+          ? 'Cannot assign orders to a partner with Pending approval status'
+          : `Cannot assign orders to a partner in ${partner.status} status`,
+      });
     }
+
+    // Business Rules: Do not ship cancelled, refunded, or unpaid orders
     if (order.status === 'Cancelled') {
       return res.status(400).json({ message: 'Cannot assign delivery partner to a cancelled order' });
     }
     if (order.status === 'Delivered') {
       return res.status(400).json({ message: 'Order is already delivered' });
+    }
+    if (order.paymentStatus === 'Refunded') {
+      return res.status(400).json({ message: 'Cannot assign delivery partner to a refunded order' });
+    }
+    if (order.paymentMethod !== 'Cash on Delivery' && order.paymentStatus !== 'Paid') {
+      return res.status(400).json({ message: 'Cannot assign delivery partner to an unpaid online order' });
     }
 
     // Check if order already has an active assignment

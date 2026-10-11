@@ -290,6 +290,30 @@ const AdminOrders = () => {
               </div>
             )}
 
+            {/* Business rules eligibility checks */}
+            {assigningOrder.paymentStatus === 'Refunded' ? (
+              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 flex items-center gap-2">
+                <AlertCircle size={16} className="text-rose-600 shrink-0" />
+                <span>Cannot dispatch: This order has been refunded.</span>
+              </div>
+            ) : assigningOrder.paymentMethod !== 'Cash on Delivery' && assigningOrder.paymentStatus !== 'Paid' ? (
+              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 flex items-center gap-2">
+                <AlertCircle size={16} className="text-amber-600 shrink-0" />
+                <div>
+                  <span className="font-bold">Unpaid Prepaid Order:</span>
+                  <p className="text-[11px] text-amber-700">
+                    Payment method is {assigningOrder.paymentMethod} but status is {assigningOrder.paymentStatus}.
+                    Orders must be successfully paid before dispatching.
+                  </p>
+                </div>
+              </div>
+            ) : ['Delivered', 'Cancelled'].includes(assigningOrder.status) ? (
+              <div className="mb-4 rounded-xl border border-slate-200 bg-slate-100 p-3 text-xs text-slate-700 flex items-center gap-2">
+                <AlertCircle size={16} className="text-slate-500 shrink-0" />
+                <span>Order is in terminal state ({assigningOrder.status}) and cannot be reassigned.</span>
+              </div>
+            ) : null}
+
             <form onSubmit={handleAssignSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
@@ -297,7 +321,7 @@ const AdminOrders = () => {
                 </label>
                 {partners.length === 0 ? (
                   <p className="text-xs text-amber-700 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
-                    No active delivery partners registered. Please add a delivery partner first in the Delivery tab.
+                    No active delivery partners registered. Please approve or add a delivery partner first in the Delivery tab.
                   </p>
                 ) : (
                   <select
@@ -351,7 +375,13 @@ const AdminOrders = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={assigning || !selectedPartnerId}
+                  disabled={
+                    assigning ||
+                    !selectedPartnerId ||
+                    assigningOrder.paymentStatus === 'Refunded' ||
+                    (assigningOrder.paymentMethod !== 'Cash on Delivery' && assigningOrder.paymentStatus !== 'Paid') ||
+                    ['Delivered', 'Cancelled'].includes(assigningOrder.status)
+                  }
                   className="btn btn-primary text-xs px-5 flex items-center gap-1.5"
                 >
                   <Truck size={14} />

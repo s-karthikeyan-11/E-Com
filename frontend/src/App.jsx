@@ -28,6 +28,7 @@ import AdminDeliveryPartners from './pages/admin/DeliveryPartners';
 import DeliveryRoute from './components/DeliveryRoute';
 import DeliveryLayout from './pages/delivery/DeliveryLayout';
 import DeliveryLogin from './pages/delivery/DeliveryLogin';
+import DeliveryRegister from './pages/delivery/DeliveryRegister';
 import DeliveryDashboard from './pages/delivery/DeliveryDashboard';
 import DeliveryOrders from './pages/delivery/DeliveryOrders';
 import DeliveryHistory from './pages/delivery/DeliveryHistory';
@@ -132,6 +133,7 @@ const App = () => (
 
               {/* Delivery Partner Portal */}
               <Route path="/delivery/login" element={<DeliveryLogin />} />
+              <Route path="/delivery/register" element={<DeliveryRegister />} />
               <Route
                 path="/delivery"
                 element={

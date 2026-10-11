@@ -45,6 +45,8 @@ exports.register = async (req, res) => {
   }
 };
 
+const DeliveryPartner = require('../models/DeliveryPartner');
+
 // POST /api/auth/login
 exports.login = async (req, res) => {
   try {
@@ -59,12 +61,35 @@ exports.login = async (req, res) => {
     }
     if (user.isBlocked) return res.status(403).json({ message: 'Account is blocked' });
 
+    let deliveryPartner = null;
+    if (user.role === 'delivery') {
+      deliveryPartner = await DeliveryPartner.findOne({ user: user._id });
+      if (deliveryPartner?.status === 'Pending') {
+        return res.status(403).json({
+          message: 'Your delivery partner registration is pending admin approval',
+          partnerStatus: 'Pending',
+        });
+      }
+      if (deliveryPartner?.status === 'Rejected') {
+        return res.status(403).json({
+          message: deliveryPartner.rejectionReason
+            ? `Your application was rejected: ${deliveryPartner.rejectionReason}`
+            : 'Your delivery partner application was rejected by the admin',
+          partnerStatus: 'Rejected',
+        });
+      }
+    }
+
     const token = signToken(user._id);
     let seller = null;
     if (user.role === 'seller') {
       seller = await Seller.findOne({ user: user._id });
     }
-    res.cookie('token', token, cookieOptions(remember !== false)).json({ user: user.toSafeObject(), seller });
+    res.cookie('token', token, cookieOptions(remember !== false)).json({
+      user: user.toSafeObject(),
+      seller,
+      deliveryPartner,
+    });
   } catch (err) {
     res.status(500).json({ message: 'Login failed' });
   }
@@ -74,10 +99,14 @@ exports.login = async (req, res) => {
 exports.getMe = async (req, res) => {
   const safeUser = req.user.toSafeObject();
   let seller = null;
+  let deliveryPartner = null;
   if (req.user.role === 'seller') {
     seller = await Seller.findOne({ user: req.user._id });
   }
-  res.json({ user: safeUser, seller });
+  if (req.user.role === 'delivery') {
+    deliveryPartner = await DeliveryPartner.findOne({ user: req.user._id });
+  }
+  res.json({ user: safeUser, seller, deliveryPartner });
 };
 
 // GET /api/auth/wallet -- the signed-in customer's refund wallet and history

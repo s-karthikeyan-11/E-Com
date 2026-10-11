@@ -43,6 +43,7 @@ const Footer = () => (
               <li><Link to="/orders" className="hover:text-white">Track order</Link></li>
               <li><Link to="/cart" className="hover:text-white">Shopping bag</Link></li>
               <li><Link to="/login" className="hover:text-white">Account</Link></li>
+              <li><Link to="/delivery/login" className="hover:text-white text-sky-400">Delivery Partner</Link></li>
             </ul>
           </div>
 

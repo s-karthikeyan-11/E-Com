@@ -2,6 +2,7 @@ const Order = require('../models/Order');
 const User = require('../models/User');
 const Product = require('../models/Product');
 const Payment = require('../models/Payment');
+const DeliveryPartner = require('../models/DeliveryPartner');
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 const razorpay = require('../config/razorpay');
@@ -714,13 +715,20 @@ exports.getMyOrders = async (req, res) => {
 exports.getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
-      .populate('user', 'name email')
+      .populate('user', 'name email phone')
       .populate('deliveryPartner', 'name phone email serviceType vehicleType vehicleNumber rating')
       .populate('shipment');
     if (!order) return res.status(404).json({ message: 'Order not found' });
     const isOwner = order.user && order.user._id.toString() === req.user._id.toString();
-    if (!isOwner && req.user.role !== 'admin' && req.user.role !== 'delivery') {
-      return res.status(403).json({ message: 'Not authorized to view this order' });
+    if (!isOwner && req.user.role !== 'admin') {
+      if (req.user.role === 'delivery') {
+        const partner = await DeliveryPartner.findOne({ user: req.user._id });
+        if (!partner || !order.deliveryPartner || order.deliveryPartner._id.toString() !== partner._id.toString()) {
+          return res.status(403).json({ message: 'Not authorized to view this order' });
+        }
+      } else {
+        return res.status(403).json({ message: 'Not authorized to view this order' });
+      }
     }
     res.json(order);
   } catch (err) {

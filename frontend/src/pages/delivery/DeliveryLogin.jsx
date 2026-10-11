@@ -116,9 +116,14 @@ const DeliveryLogin = () => {
             </button>
           </form>
 
-          <div className="mt-6 border-t border-slate-100 pt-5 text-center text-xs text-slate-400">
-            <p>Need delivery partner access? Contact your logistics administrator.</p>
-            <div className="mt-3 flex justify-center gap-4 text-slate-500">
+          <div className="mt-6 border-t border-slate-100 pt-5 text-center text-xs text-slate-500">
+            <p>
+              Want to deliver with us?{' '}
+              <Link to="/delivery/register" className="font-bold text-sky-700 hover:underline">
+                Apply to become a Partner
+              </Link>
+            </p>
+            <div className="mt-3 flex justify-center gap-4 text-slate-400">
               <Link to="/login" className="hover:text-indigo-600 font-medium">Customer Login</Link>
               <span>·</span>
               <Link to="/seller/login" className="hover:text-indigo-600 font-medium">Seller Login</Link>
