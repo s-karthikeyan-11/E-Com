@@ -5,6 +5,8 @@ const Order = require('../models/Order');
 const DeliveryPartner = require('../models/DeliveryPartner');
 const Shipment = require('../models/Shipment');
 const { getCookieSameSite } = require('../config/env');
+const { toPaise, paiseForOrder, postLedgerEntry } = require('../utils/finance');
+const { recordSellerEarningsForOrder } = require('./sellerController');
 
 const normalizeEmail = (value) => (typeof value === 'string' ? value.trim().toLowerCase() : '');
 
@@ -478,16 +480,65 @@ exports.updateDeliveryStatus = async (req, res) => {
       shipment.deliveredAt = now;
       if (receiverName) shipment.receiverName = receiverName.trim();
 
-      // If COD order was pending, delivery marks it as collected and paid
-      if (order && order.paymentMethod === 'Cash on Delivery' && order.paymentStatus !== 'Paid') {
+      // COD is collected only on a completed delivery, never at order creation.
+      if (order && order.paymentMethod === 'Cash on Delivery' && !shipment.codCollected) {
+        const codAmountInPaise = paiseForOrder(order);
+        const codAmount = codAmountInPaise / 100;
+        shipment.codAmountInPaise = codAmountInPaise;
+        shipment.codAmount = codAmount;
+        shipment.codCollected = true;
+        shipment.codCollectedAt = now;
+        order.codCollected = true;
+        order.codCollectedAt = now;
         order.paymentStatus = 'Paid';
         order.paidAt = now;
+
+        // Post double-entry to FinancialLedger:
+        // Debit CODReceivable (cash held by rider), Credit CustomerCash
+        await postLedgerEntry({
+          order: order._id,
+          shipment: shipment._id,
+          transactionReference: `COD-COL-${shipment.trackingNumber}`,
+          idempotencyKey: `LED_COD_COL_${shipment._id}`,
+          eventType: 'COD_COLLECTED',
+          debitAccount: 'CODReceivable',
+          creditAccount: 'CustomerCash',
+          amountInPaise: codAmountInPaise,
+          description: `Rider collected ₹${codAmount} COD cash on delivery of AWB #${shipment.trackingNumber}`,
+        });
+
+        // The allocation creates payables only after cash was actually
+        // collected. COD settlement remains blocked until remittance.
+        await recordSellerEarningsForOrder(order);
+      }
+
+      // External courier invoices are expenses, not an internal partner's
+      // earnings. The internal fee was snapshotted at assignment.
+      if (shipment.carrierType !== 'External' && shipment.deliveryPartner) {
+        const feeInPaise = Number.isSafeInteger(shipment.deliveryFeeEarnedInPaise)
+          ? shipment.deliveryFeeEarnedInPaise
+          : toPaise(shipment.deliveryFeeEarned || 0);
+        if (feeInPaise > 0) {
+          await postLedgerEntry({
+            order: order?._id,
+            shipment: shipment._id,
+            transactionReference: `DEL-FEE-${shipment.trackingNumber}`,
+            idempotencyKey: `LED_DEL_EARN_${shipment._id}`,
+            eventType: 'DELIVERY_PAYABLE_CREDITED',
+            debitAccount: 'DeliveryExpense',
+            creditAccount: 'DeliveryPartnerPayable',
+            amountInPaise: feeInPaise,
+            description: `Delivery fee earned by partner for delivering AWB #${shipment.trackingNumber}`,
+          });
+        }
       }
 
       // Update delivery partner statistics
-      await DeliveryPartner.findByIdAndUpdate(shipment.deliveryPartner, {
-        $inc: { activeShipmentsCount: -1, totalDeliveredCount: 1 },
-      });
+      if (shipment.deliveryPartner) {
+        await DeliveryPartner.findByIdAndUpdate(shipment.deliveryPartner, {
+          $inc: { activeShipmentsCount: -1, totalDeliveredCount: 1 },
+        });
+      }
     } else if (status === 'Failed Delivery') {
       shipment.ndrAttempts = (shipment.ndrAttempts || 0) + 1;
       if (failedReason) shipment.failedReason = failedReason.trim();
@@ -497,9 +548,11 @@ exports.updateDeliveryStatus = async (req, res) => {
       if (rtoReason) shipment.rtoReason = rtoReason.trim();
     } else if (status === 'RTO Delivered') {
       shipment.rtoDeliveredAt = now;
-      await DeliveryPartner.findByIdAndUpdate(shipment.deliveryPartner, {
-        $inc: { activeShipmentsCount: -1 },
-      });
+      if (shipment.deliveryPartner) {
+        await DeliveryPartner.findByIdAndUpdate(shipment.deliveryPartner, {
+          $inc: { activeShipmentsCount: -1 },
+        });
+      }
     }
 
     // Record checkpoint history

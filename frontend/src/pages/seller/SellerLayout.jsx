@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, Link, useNavigate } from 'react-router-dom';
 import {
+  Banknote,
   BarChart3,
   Boxes,
   CircleDollarSign,
@@ -21,6 +22,7 @@ const navItems = [
   { to: '/seller/products', label: 'Products', icon: Boxes },
   { to: '/seller/orders', label: 'Orders', icon: Package },
   { to: '/seller/earnings', label: 'Earnings', icon: CircleDollarSign },
+  { to: '/seller/settlements', label: 'Settlements', icon: Banknote },
   { to: '/seller/reports', label: 'Reports', icon: BarChart3 },
   { to: '/seller/profile', label: 'Store Profile', icon: Settings },
 ];
@@ -38,7 +40,7 @@ const SellerLayout = () => {
 
   const handleLogout = () => {
     logout();
-    navigate('/seller/login');
+    navigate('/');
   };
 
   return (

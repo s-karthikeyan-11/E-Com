@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, Clock, Package, Truck, X } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, Clock, Package, Plus, RefreshCw, Search, Truck, X } from 'lucide-react';
 import api from '../../api/axios';
 import { formatDay, isPastDay } from '../../utils/dates';
 
@@ -55,6 +55,8 @@ const AdminOrders = () => {
   const [orders, setOrders] = useState([]);
   const [filter, setFilter] = useState('');
   const [partners, setPartners] = useState([]);
+  const [loadingPartners, setLoadingPartners] = useState(false);
+  const [partnersError, setPartnersError] = useState('');
 
   // Assign Delivery Modal
   const [assigningOrder, setAssigningOrder] = useState(null);
@@ -63,17 +65,39 @@ const AdminOrders = () => {
   const [assignNotes, setAssignNotes] = useState('');
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [courierSearch, setCourierSearch] = useState('');
+
+  // Quick Add Courier inside Assign Modal
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [quickName, setQuickName] = useState('');
+  const [quickPhone, setQuickPhone] = useState('');
+  const [quickEmail, setQuickEmail] = useState('');
+  const [quickServiceType, setQuickServiceType] = useState('Standard');
+  const [quickVehicleNumber, setQuickVehicleNumber] = useState('');
+  const [savingQuickCourier, setSavingQuickCourier] = useState(false);
 
   const load = (status) =>
     api
       .get('/admin/orders', { params: status ? { status } : {} })
       .then(({ data }) => setOrders(data));
 
-  const loadPartners = () => {
-    api
-      .get('/admin/delivery-partners?status=Active')
-      .then(({ data }) => setPartners(data.partners || []))
-      .catch(() => {});
+  const loadPartners = async () => {
+    setLoadingPartners(true);
+    setPartnersError('');
+    try {
+      // Fetch all delivery partners so both active and newly registered couriers are visible
+      const { data } = await api.get('/admin/delivery-partners');
+      const list = data.partners || [];
+      setPartners(list);
+      return list;
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to load courier partners list';
+      setPartnersError(msg);
+      return [];
+    } finally {
+      setLoadingPartners(false);
+    }
   };
 
   useEffect(() => {
@@ -96,32 +120,96 @@ const AdminOrders = () => {
     }
   };
 
-  const openAssignModal = (order) => {
+  const openAssignModal = async (order) => {
     setAssigningOrder(order);
-    setSelectedPartnerId(order.deliveryPartner?._id || (partners[0]?._id || ''));
-    setExpectedDate(
-      order.estimatedDelivery
-        ? new Date(order.estimatedDelivery).toISOString().slice(0, 10)
-        : new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10)
-    );
     setAssignNotes('');
     setAssignError('');
+    setCourierSearch('');
+    setShowQuickAdd(false);
+
+    let defaultDate = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+    if (order.estimatedDelivery) {
+      try {
+        const d = new Date(order.estimatedDelivery);
+        if (!isNaN(d.getTime())) defaultDate = d.toISOString().slice(0, 10);
+      } catch {}
+    }
+    setExpectedDate(defaultDate);
+
+    const existingId =
+      order.deliveryPartner?._id ||
+      (typeof order.deliveryPartner === 'string' ? order.deliveryPartner : '');
+
+    // Preselect from existing in-memory partners immediately
+    if (partners.length > 0) {
+      const matched = partners.some((p) => p._id === existingId);
+      setSelectedPartnerId(matched ? existingId : partners[0]?._id || '');
+    }
+
+    // Refresh fresh list in background
+    const freshPartners = await loadPartners();
+    if (freshPartners.length > 0) {
+      const matched = freshPartners.some((p) => p._id === existingId);
+      setSelectedPartnerId(matched ? existingId : freshPartners[0]?._id || '');
+    }
+  };
+
+  const handleQuickAddCourier = async (e) => {
+    e.preventDefault();
+    if (!quickName.trim() || !quickPhone.trim()) {
+      setAssignError('Please provide at least Courier Name and Phone Number');
+      return;
+    }
+
+    setSavingQuickCourier(true);
+    setAssignError('');
+    try {
+      const generatedEmail = quickEmail.trim() || `courier_${Date.now()}@shoppingnow.local`;
+      const { data } = await api.post('/admin/delivery-partners', {
+        name: quickName.trim(),
+        phone: quickPhone.trim(),
+        email: generatedEmail,
+        password: 'Password123!',
+        serviceType: quickServiceType,
+        vehicleType: 'Bike',
+        vehicleNumber: quickVehicleNumber.trim(),
+      });
+      const newPartner = data.partner;
+      const updatedList = [newPartner, ...partners];
+      setPartners(updatedList);
+      setSelectedPartnerId(newPartner._id);
+      setShowQuickAdd(false);
+      setQuickName('');
+      setQuickPhone('');
+      setQuickEmail('');
+      setQuickVehicleNumber('');
+    } catch (err) {
+      setAssignError(err.response?.data?.message || 'Failed to create new courier partner');
+    } finally {
+      setSavingQuickCourier(false);
+    }
   };
 
   const handleAssignSubmit = async (e) => {
     e.preventDefault();
-    if (!assigningOrder || !selectedPartnerId) return;
+    if (!assigningOrder || !selectedPartnerId) {
+      setAssignError('Please select a delivery partner from the list.');
+      return;
+    }
 
     setAssigning(true);
     setAssignError('');
 
     try {
-      await api.post(`/admin/orders/${assigningOrder._id}/assign-delivery`, {
+      const { data } = await api.post(`/admin/orders/${assigningOrder._id}/assign-delivery`, {
         partnerId: selectedPartnerId,
         expectedDeliveryDate: expectedDate,
         notes: assignNotes,
       });
+      const orderNum = assigningOrder._id.slice(-6).toUpperCase();
       setAssigningOrder(null);
+      setSuccessMsg(data.message || `Delivery partner assigned to Order #${orderNum}!`);
+      setTimeout(() => setSuccessMsg(''), 5000);
       load(filter);
     } catch (err) {
       setAssignError(err.response?.data?.message || 'Failed to assign delivery partner');
@@ -129,6 +217,17 @@ const AdminOrders = () => {
       setAssigning(false);
     }
   };
+
+  const filteredCouriers = partners.filter((p) => {
+    if (!courierSearch.trim()) return true;
+    const q = courierSearch.toLowerCase();
+    return (
+      p.name?.toLowerCase().includes(q) ||
+      p.phone?.includes(q) ||
+      p.serviceType?.toLowerCase().includes(q) ||
+      p.vehicleNumber?.toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div>
@@ -152,6 +251,13 @@ const AdminOrders = () => {
           </select>
         </label>
       </div>
+
+      {successMsg && (
+        <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold text-emerald-800 flex items-center gap-2">
+          <Truck size={16} className="text-emerald-600 shrink-0" />
+          <span>{successMsg}</span>
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-[24px] border border-slate-200">
         <table className="w-full min-w-[960px] border-collapse bg-white">
@@ -214,17 +320,19 @@ const AdminOrders = () => {
                       <div className="font-mono text-[10px] text-sky-700 font-semibold mt-0.5">
                         {o.trackingNumber || o.shipment?.trackingNumber || 'AWB Generated'}
                       </div>
-                      <button
-                        onClick={() => openAssignModal(o)}
-                        className="text-[10px] text-slate-400 hover:text-slate-700 underline mt-1"
-                      >
-                        Re-assign
-                      </button>
+                      {o.status !== 'Cancelled' && (
+                        <button
+                          onClick={() => openAssignModal(o)}
+                          className="text-[10px] text-sky-600 hover:text-sky-800 underline mt-1 font-semibold block"
+                        >
+                          Re-assign Partner
+                        </button>
+                      )}
                     </div>
-                  ) : !['Delivered', 'Cancelled'].includes(o.status) ? (
+                  ) : o.status !== 'Cancelled' ? (
                     <button
                       onClick={() => openAssignModal(o)}
-                      className="btn btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1 text-sky-700 hover:bg-sky-50"
+                      className="btn btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1 text-sky-700 hover:bg-sky-50 font-semibold shadow-2xs"
                     >
                       <Truck size={12} />
                       <span>Assign Courier</span>
@@ -296,47 +404,205 @@ const AdminOrders = () => {
                 <AlertCircle size={16} className="text-rose-600 shrink-0" />
                 <span>Cannot dispatch: This order has been refunded.</span>
               </div>
-            ) : assigningOrder.paymentMethod !== 'Cash on Delivery' && assigningOrder.paymentStatus !== 'Paid' ? (
-              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 flex items-center gap-2">
-                <AlertCircle size={16} className="text-amber-600 shrink-0" />
-                <div>
-                  <span className="font-bold">Unpaid Prepaid Order:</span>
-                  <p className="text-[11px] text-amber-700">
-                    Payment method is {assigningOrder.paymentMethod} but status is {assigningOrder.paymentStatus}.
-                    Orders must be successfully paid before dispatching.
-                  </p>
-                </div>
-              </div>
-            ) : ['Delivered', 'Cancelled'].includes(assigningOrder.status) ? (
+            ) : assigningOrder.status === 'Cancelled' ? (
               <div className="mb-4 rounded-xl border border-slate-200 bg-slate-100 p-3 text-xs text-slate-700 flex items-center gap-2">
                 <AlertCircle size={16} className="text-slate-500 shrink-0" />
-                <span>Order is in terminal state ({assigningOrder.status}) and cannot be reassigned.</span>
+                <span>Order has been cancelled and cannot be assigned for delivery.</span>
+              </div>
+            ) : assigningOrder.status === 'Delivered' ? (
+              <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 flex items-center gap-2">
+                <Truck size={16} className="text-emerald-600 shrink-0" />
+                <span>Order is marked Delivered. Assigning a courier will update the assigned courier fleet member & shipment history.</span>
+              </div>
+            ) : assigningOrder.paymentStatus !== 'Paid' && !/cash\s*on\s*delivery|cod/i.test(assigningOrder.paymentMethod || '') ? (
+              <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50/80 p-3 text-xs text-sky-900 flex items-center gap-2">
+                <AlertCircle size={16} className="text-sky-600 shrink-0" />
+                <div>
+                  <span className="font-bold">Payment Status: {assigningOrder.paymentStatus} ({assigningOrder.paymentMethod || 'Online'})</span>
+                  <p className="text-[11px] text-sky-700">
+                    Assigning a courier will generate an AWB and advance the order status to Packed.
+                  </p>
+                </div>
               </div>
             ) : null}
 
             <form onSubmit={handleAssignSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
-                  Select Active Delivery Partner *
-                </label>
-                {partners.length === 0 ? (
-                  <p className="text-xs text-amber-700 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
-                    No active delivery partners registered. Please approve or add a delivery partner first in the Delivery tab.
-                  </p>
-                ) : (
-                  <select
-                    value={selectedPartnerId}
-                    onChange={(e) => setSelectedPartnerId(e.target.value)}
-                    className="input text-xs font-semibold"
-                    required
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                    Select Courier Partner * ({partners.length} Available)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickAdd(!showQuickAdd)}
+                    className="text-xs font-bold text-sky-600 hover:text-sky-800 flex items-center gap-1 transition"
                   >
-                    <option value="">-- Choose Courier Partner --</option>
-                    {partners.map((p) => (
-                      <option key={p._id} value={p._id}>
-                        {p.name} ({p.serviceType} · {p.phone})
-                      </option>
-                    ))}
-                  </select>
+                    <Plus size={13} />
+                    <span>{showQuickAdd ? 'Close' : '+ Quick Add Courier'}</span>
+                  </button>
+                </div>
+
+                {/* Quick Add Courier Inline Drawer */}
+                {showQuickAdd && (
+                  <div className="mb-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 space-y-2.5">
+                    <p className="text-xs font-bold text-sky-900">Add New Courier Fleet Partner</p>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="text-[10px] uppercase font-semibold text-slate-500">Full Name *</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Rahul Courier"
+                          value={quickName}
+                          onChange={(e) => setQuickName(e.target.value)}
+                          className="input py-1 text-xs"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase font-semibold text-slate-500">Phone *</label>
+                        <input
+                          type="tel"
+                          placeholder="e.g. 9876543210"
+                          value={quickPhone}
+                          onChange={(e) => setQuickPhone(e.target.value)}
+                          className="input py-1 text-xs"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase font-semibold text-slate-500">Service Type</label>
+                        <select
+                          value={quickServiceType}
+                          onChange={(e) => setQuickServiceType(e.target.value)}
+                          className="input py-1 text-xs"
+                        >
+                          <option value="Standard">Standard</option>
+                          <option value="Express">Express</option>
+                          <option value="Hyperlocal">Hyperlocal</option>
+                          <option value="Surface">Surface</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase font-semibold text-slate-500">Vehicle No.</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. TN 45 AB 1234"
+                          value={quickVehicleNumber}
+                          onChange={(e) => setQuickVehicleNumber(e.target.value)}
+                          className="input py-1 text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={handleQuickAddCourier}
+                        disabled={savingQuickCourier || !quickName.trim() || !quickPhone.trim()}
+                        className="btn btn-primary text-xs py-1.5 px-3 shadow-xs"
+                      >
+                        {savingQuickCourier ? 'Adding…' : 'Save & Select Courier'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Search Box if list has more than 2 items */}
+                {partners.length > 2 && (
+                  <div className="relative mb-2">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search courier by name, vehicle, or phone..."
+                      value={courierSearch}
+                      onChange={(e) => setCourierSearch(e.target.value)}
+                      className="input pl-8 py-1.5 text-xs w-full"
+                    />
+                  </div>
+                )}
+
+                {loadingPartners ? (
+                  <div className="p-5 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-center gap-2">
+                    <RefreshCw size={15} className="animate-spin text-sky-600" />
+                    <span>Loading courier fleet…</span>
+                  </div>
+                ) : partnersError ? (
+                  <div className="p-3 text-xs text-rose-700 bg-rose-50 rounded-2xl border border-rose-200 flex items-center justify-between">
+                    <span>{partnersError}</span>
+                    <button
+                      type="button"
+                      onClick={loadPartners}
+                      className="text-xs font-bold underline ml-2"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : partners.length === 0 ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+                    <p className="font-bold">No delivery partners found in the system.</p>
+                    <p className="mt-1 text-[11px] text-amber-700">
+                      Click <strong>"+ Quick Add Courier"</strong> above to register a courier partner instantly!
+                    </p>
+                  </div>
+                ) : filteredCouriers.length === 0 ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-center text-xs text-slate-500">
+                    No courier matches "{courierSearch}".
+                  </div>
+                ) : (
+                  <div className="max-h-52 overflow-y-auto space-y-2 pr-1 rounded-2xl border border-slate-100 p-1.5 bg-slate-50/50">
+                    {filteredCouriers.map((p) => {
+                      const isSelected = selectedPartnerId === p._id;
+                      return (
+                        <div
+                          key={p._id}
+                          onClick={() => setSelectedPartnerId(p._id)}
+                          className={`cursor-pointer rounded-xl border p-2.5 transition flex items-center justify-between ${
+                            isSelected
+                              ? 'border-sky-600 bg-sky-50 ring-2 ring-sky-500/30 shadow-xs'
+                              : 'border-slate-200 bg-white hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                                isSelected ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              <Truck size={16} />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-xs text-slate-900">{p.name}</span>
+                                <span className="rounded bg-slate-100 px-1.5 py-0.2 text-[10px] font-semibold text-slate-700">
+                                  {p.serviceType}
+                                </span>
+                                <span
+                                  className={`rounded px-1.5 py-0.2 text-[10px] font-bold ${
+                                    p.status === 'Active'
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-amber-100 text-amber-800'
+                                  }`}
+                                >
+                                  {p.status}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-2">
+                                <span>📞 {p.phone}</span>
+                                {p.vehicleNumber && <span>· 🛵 {p.vehicleNumber}</span>}
+                                <span className="font-medium text-slate-600">· {p.activeShipmentsCount || 0} active</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                              isSelected ? 'border-sky-600 bg-sky-600 text-white' : 'border-slate-300'
+                            }`}
+                          >
+                            {isSelected && <Check size={12} strokeWidth={3} />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 
@@ -379,8 +645,7 @@ const AdminOrders = () => {
                     assigning ||
                     !selectedPartnerId ||
                     assigningOrder.paymentStatus === 'Refunded' ||
-                    (assigningOrder.paymentMethod !== 'Cash on Delivery' && assigningOrder.paymentStatus !== 'Paid') ||
-                    ['Delivered', 'Cancelled'].includes(assigningOrder.status)
+                    assigningOrder.status === 'Cancelled'
                   }
                   className="btn btn-primary text-xs px-5 flex items-center gap-1.5"
                 >

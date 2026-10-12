@@ -23,69 +23,159 @@ const signToken = (id) =>
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   });
 
+const { toPaise, fromPaise, paiseForDeliveryFee, postLedgerEntry } = require('../utils/finance');
+
 // Record seller earnings & transaction ledger for an order
 exports.recordSellerEarningsForOrder = async (order) => {
-  try {
-    if (!order || !order.items || !order.items.length) return;
+  if (!order || !order.items || !order.items.length) return;
 
-    // Group items by seller
-    const sellerItems = new Map();
-    for (const item of order.items) {
-      if (item.seller) {
-        const sId = item.seller.toString();
-        if (!sellerItems.has(sId)) sellerItems.set(sId, []);
-        sellerItems.get(sId).push(item);
+  const isPaid = order.paymentStatus === 'Paid';
+  const reference = order.razorpayPaymentId || order.trackingNumber || String(order._id);
+  const sellerIds = new Set();
+
+  for (const item of order.items) {
+    const lineTotalInPaise = Number.isSafeInteger(item.lineTotalInPaise)
+      ? item.lineTotalInPaise
+      : toPaise(item.lineTotal || 0);
+    const commissionInPaise = Number.isSafeInteger(item.commissionAmountInPaise)
+      ? item.commissionAmountInPaise
+      : toPaise(item.commissionAmount || 0);
+    const netEarningInPaise = Number.isSafeInteger(item.netEarningInPaise)
+      ? item.netEarningInPaise
+      : lineTotalInPaise - commissionInPaise;
+    const itemKey = `${order._id}_${item.product}`;
+
+    if (!item.seller) {
+      if (isPaid) {
+        await postLedgerEntry({
+          order: order._id,
+          transactionReference: reference,
+          idempotencyKey: `LED_MERCH_SALE_${itemKey}`,
+          eventType: 'MERCHANDISE_SALE_RECORDED',
+          debitAccount: 'CustomerCash',
+          creditAccount: 'MerchandiseSalesRevenue',
+          amountInPaise: lineTotalInPaise,
+          description: `Platform merchandise sale for ${item.name}`,
+        });
       }
+      continue;
     }
 
-    for (const [sellerId, items] of sellerItems.entries()) {
-      const seller = await Seller.findById(sellerId);
-      if (!seller) continue;
+    const sellerId = item.seller.toString();
+    sellerIds.add(sellerId);
+    const seller = await Seller.findById(sellerId).select('_id');
+    if (!seller) continue;
 
-      const rate = seller.commissionRate || 10;
-      let totalOrderAmount = 0;
-
-      for (const item of items) {
-        const itemTotal = Number(item.lineTotal || 0);
-        totalOrderAmount += itemTotal;
-
-        const commissionAmount = +(itemTotal * (rate / 100)).toFixed(2);
-        const netEarning = +(itemTotal - commissionAmount).toFixed(2);
-
-        // Check if transaction already exists for this order & product
-        const existingTx = await SellerTransaction.findOne({ order: order._id, product: item.product });
-        if (!existingTx) {
-          await SellerTransaction.create({
-            seller: seller._id,
-            order: order._id,
-            product: item.product,
-            type: 'Order Sale',
-            orderAmount: itemTotal,
-            commissionRate: rate,
-            commissionAmount,
-            netEarning,
-            status: order.paymentStatus === 'Paid' ? 'Completed' : 'Pending',
-            paymentStatus: order.paymentStatus,
-            orderStatus: item.sellerStatus || order.status,
-            description: `Sale of ${item.name} (x${item.quantity})`,
-          });
-        }
-      }
-
-      const commission = +(totalOrderAmount * (rate / 100)).toFixed(2);
-      const net = +(totalOrderAmount - commission).toFixed(2);
-
-      await Seller.findByIdAndUpdate(seller._id, {
-        $inc: {
-          totalSales: totalOrderAmount,
-          totalCommission: commission,
-          netEarnings: net,
-          totalOrders: 1,
+    await SellerTransaction.findOneAndUpdate(
+      { idempotencyKey: `SELLER_SALE_${itemKey}` },
+      {
+        $setOnInsert: {
+          seller: seller._id,
+          order: order._id,
+          product: item.product,
+          type: 'Order Sale',
+          orderAmountInPaise: lineTotalInPaise,
+          orderAmount: fromPaise(lineTotalInPaise),
+          commissionRate: Number(item.commissionRate || 0),
+          commissionAmountInPaise: commissionInPaise,
+          commissionAmount: fromPaise(commissionInPaise),
+          netEarningInPaise,
+          netEarning: fromPaise(netEarningInPaise),
+          status: isPaid ? 'Completed' : 'Pending',
+          paymentStatus: order.paymentStatus,
+          orderStatus: item.sellerStatus || order.status,
+          description: `Sale of ${item.name} (x${item.quantity})`,
+          idempotencyKey: `SELLER_SALE_${itemKey}`,
         },
+        ...(isPaid ? { $set: { status: 'Completed', paymentStatus: 'Paid' } } : {}),
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    if (isPaid) {
+      await postLedgerEntry({
+        order: order._id,
+        transactionReference: reference,
+        idempotencyKey: `LED_SELLER_EARN_${itemKey}`,
+        eventType: 'SELLER_PAYABLE_CREDITED',
+        debitAccount: 'CustomerCash',
+        creditAccount: 'SellerPayable',
+        amountInPaise: netEarningInPaise,
+        description: `Seller payable credited for ${item.name} (Order #${order._id.toString().slice(-6)})`,
       });
+      if (commissionInPaise > 0) {
+        await postLedgerEntry({
+          order: order._id,
+          transactionReference: reference,
+          idempotencyKey: `LED_COMM_EARN_${itemKey}`,
+          eventType: 'COMMISSION_EARNED',
+          debitAccount: 'CustomerCash',
+          creditAccount: 'PlatformCommissionRevenue',
+          amountInPaise: commissionInPaise,
+          description: `Platform commission on ${item.name} (${item.commissionRate || 0}%)`,
+        });
+      }
     }
-  } catch (err) {
-    console.error('Failed to record seller earnings:', err);
+  }
+
+  if (!isPaid) return;
+
+  const deliveryFeeInPaise = paiseForDeliveryFee(order);
+  if (deliveryFeeInPaise > 0) {
+    await postLedgerEntry({
+      order: order._id,
+      transactionReference: reference,
+      idempotencyKey: `LED_SHIP_REV_${order._id}`,
+      eventType: 'SHIPPING_REVENUE_RECORDED',
+      debitAccount: 'CustomerCash',
+      creditAccount: 'ShippingRevenue',
+      amountInPaise: deliveryFeeInPaise,
+      description: `Customer delivery fee on Order #${order._id.toString().slice(-6)}`,
+    });
+  }
+
+  const couponDiscountInPaise = Number.isSafeInteger(order.couponDiscountInPaise)
+    ? order.couponDiscountInPaise
+    : toPaise(order.couponDiscount || 0);
+  if (couponDiscountInPaise > 0) {
+    await postLedgerEntry({
+      order: order._id,
+      transactionReference: reference,
+      idempotencyKey: `LED_PROMOTION_${order._id}`,
+      eventType: 'PROMOTION_SUBSIDY_RECORDED',
+      debitAccount: 'PromotionExpense',
+      creditAccount: 'CustomerCash',
+      amountInPaise: couponDiscountInPaise,
+      description: `Platform-funded coupon ${order.couponCode || 'discount'} on Order #${order._id.toString().slice(-6)}`,
+    });
+  }
+
+  // These legacy summary fields are a cache only. Recompute them from
+  // idempotent transactions instead of incrementing them on retries.
+  for (const sellerId of sellerIds) {
+    const [summary] = await SellerTransaction.aggregate([
+      { $match: { seller: new mongoose.Types.ObjectId(sellerId), status: 'Completed' } },
+      {
+        $group: {
+          _id: null,
+          totalSales: { $sum: '$orderAmount' },
+          totalCommission: { $sum: '$commissionAmount' },
+          netEarnings: { $sum: '$netEarning' },
+          totalOrders: { $addToSet: '$order' },
+        },
+      },
+    ]);
+    await Seller.updateOne(
+      { _id: sellerId },
+      {
+        $set: {
+          totalSales: summary?.totalSales || 0,
+          totalCommission: summary?.totalCommission || 0,
+          netEarnings: summary?.netEarnings || 0,
+          totalOrders: summary?.totalOrders?.length || 0,
+        },
+      }
+    );
   }
 };
 
@@ -193,8 +283,8 @@ exports.registerSeller = async (req, res) => {
         });
       }
 
-      // Upgrade user role to seller
-      existingUser.role = 'seller';
+      // Keep role as 'user' until admin approves the seller application.
+      // updateSellerStatus() will promote to 'seller' on Approved.
       if (name && name.trim()) existingUser.name = name.trim();
       await existingUser.save();
 
@@ -226,12 +316,12 @@ exports.registerSeller = async (req, res) => {
       });
     }
 
-    // Brand new user registration
+    // Brand new user registration — role stays 'user' until admin approves.
     const user = await User.create({
       name: name.trim(),
       email: normalizedEmail,
       password,
-      role: 'seller',
+      role: 'user',
     });
 
     const seller = await Seller.create({
@@ -332,7 +422,34 @@ exports.loginSeller = async (req, res) => {
   }
 };
 
+// GET /api/seller/application-status (any authenticated user)
+// Returns the current user's seller application status without requiring sellerOnly.
+// Used by the frontend SellerRoute to detect pending applicants (role='user').
+exports.getSellerApplicationStatus = async (req, res) => {
+  try {
+    const seller = await Seller.findOne({ user: req.user._id }).select(
+      '_id storeName status rejectionReason createdAt'
+    );
+    if (!seller) {
+      return res.status(404).json({ message: 'No seller application found for this account' });
+    }
+    res.json({
+      status: seller.status,
+      seller: {
+        _id: seller._id,
+        storeName: seller.storeName,
+        status: seller.status,
+        rejectionReason: seller.rejectionReason || '',
+        appliedAt: seller.createdAt,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch seller application status' });
+  }
+};
+
 // GET /api/seller/profile
+
 exports.getSellerProfile = async (req, res) => {
   try {
     const seller = await Seller.findById(req.seller._id).populate('user', 'name email createdAt');
@@ -751,8 +868,14 @@ exports.getSellerReports = async (req, res) => {
     const sellerId = req.seller._id;
     const { from, to } = req.query;
 
-    const fromDate = from ? new Date(`${from}T00:00:00.000Z`) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const toDate = to ? new Date(`${to}T23:59:59.999Z`) : new Date();
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // UTC+05:30
+    // Interpret the calendar dates as IST boundaries (midnight–23:59:59 IST)
+    const fromDate = from
+      ? new Date(new Date(`${from}T00:00:00.000Z`).getTime() - IST_OFFSET_MS)
+      : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const toDate = to
+      ? new Date(new Date(`${to}T23:59:59.999Z`).getTime() - IST_OFFSET_MS)
+      : new Date();
 
     const dateFilter = { createdAt: mongoose.trusted({ $gte: fromDate, $lte: toDate }) };
 
@@ -856,7 +979,7 @@ exports.getSellerReports = async (req, res) => {
         revenue: +p.revenue.toFixed(2),
       }))
       .sort((a, b) => b.revenue - a.revenue)
-      .slice(10);
+      .slice(0, 10);
 
     const totalInventoryCount = products.reduce((acc, p) => acc + (p.stock || 0), 0);
     const lowStockCount = products.filter((p) => p.isActive && p.stock <= (p.lowStockThreshold || 5)).length;

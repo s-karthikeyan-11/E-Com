@@ -75,6 +75,18 @@ const deliveryPartnerSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    payoutPricing: {
+      mode: { type: String, enum: ['Per Delivery', 'Distance'], default: 'Per Delivery' },
+      perDeliveryFeeInPaise: { type: Number, default: 4000, min: 0 },
+      perKmRateInPaise: { type: Number, default: 0, min: 0 },
+    },
+    bankDetails: {
+      accountHolder: { type: String, default: '', maxlength: 100 },
+      accountNumber: { type: String, default: '', maxlength: 40 },
+      ifscCode: { type: String, default: '', maxlength: 20 },
+      bankName: { type: String, default: '', maxlength: 100 },
+      upiId: { type: String, default: '', maxlength: 120 },
+    },
     address: {
       line1: { type: String, default: '' },
       city: { type: String, default: '' },

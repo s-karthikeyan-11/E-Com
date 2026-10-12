@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Clock, ShieldAlert, Store } from 'lucide-react';
+import { Clock, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/axios';
 
@@ -9,9 +9,16 @@ const SellerRoute = ({ children }) => {
   const [seller, setSeller] = useState(null);
   const [checkingSeller, setCheckingSeller] = useState(true);
   const [errorStatus, setErrorStatus] = useState(null);
+  const [noApplication, setNoApplication] = useState(false);
 
   useEffect(() => {
-    if (!loading && user?.role === 'seller') {
+    if (loading || !user) {
+      setCheckingSeller(false);
+      return;
+    }
+
+    if (user.role === 'seller') {
+      // Already an approved seller — load their profile
       api.get('/seller/profile')
         .then(({ data }) => {
           setSeller(data);
@@ -23,7 +30,17 @@ const SellerRoute = ({ children }) => {
         })
         .finally(() => setCheckingSeller(false));
     } else {
-      setCheckingSeller(false);
+      // Regular customer: check if they have a pending/rejected application
+      api.get('/seller/application-status')
+        .then(({ data }) => {
+          setSeller(data.seller || null);
+          setErrorStatus(data.status || null);
+        })
+        .catch(() => {
+          // 404 = no application found — they're a fresh applicant
+          setNoApplication(true);
+        })
+        .finally(() => setCheckingSeller(false));
     }
   }, [loading, user]);
 
@@ -39,14 +56,19 @@ const SellerRoute = ({ children }) => {
   }
 
   if (!user) {
-    return <Navigate to="/seller/login" replace />;
+    // Not authenticated → unified customer login
+    return <Navigate to="/login" state={{ from: '/seller/dashboard', message: 'Please log in to access the Seller Hub.' }} replace />;
   }
 
   if (user.role !== 'seller') {
-    return <Navigate to="/seller/register" replace />;
+    // Customer with no application yet → register
+    if (noApplication) {
+      return <Navigate to="/seller/register" replace />;
+    }
+    // Otherwise fall through to render status screens below (Pending / Rejected / Suspended)
   }
 
-  // Handle pending or non-approved seller statuses
+  // Pending approval (works for both role='user' applicants and role='seller' suspended edge case)
   if (errorStatus === 'Pending' || seller?.status === 'Pending') {
     return (
       <div className="section-shell py-16">
@@ -56,26 +78,23 @@ const SellerRoute = ({ children }) => {
           </div>
           <h1 className="mt-5 text-2xl font-bold text-slate-900">Application Under Review</h1>
           <p className="mt-2 text-sm leading-relaxed text-slate-600">
-            Your seller application for <strong className="text-slate-900">{seller?.storeName || 'your store'}</strong> has been submitted and is awaiting approval by the Admin team.
+            Your seller application for{' '}
+            <strong className="text-slate-900">{seller?.storeName || 'your store'}</strong>{' '}
+            has been submitted and is awaiting approval by the Admin team.
           </p>
           <div className="mt-6 rounded-xl bg-slate-50 p-4 text-left text-xs text-slate-500">
             <p className="font-semibold text-slate-700">What happens next?</p>
             <ul className="mt-1.5 list-inside list-disc space-y-1">
-              <li>Our admin reviews your business details.</li>
-              <li>Once approved, your seller dashboard and product listing features unlock automatically.</li>
+              <li>Our admin reviews your business details within 24 business hours.</li>
+              <li>Once approved, your seller dashboard unlocks automatically — no separate login needed.</li>
+              <li>You can continue shopping as a customer in the meantime.</li>
             </ul>
           </div>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
-            <button
-              onClick={() => window.location.reload()}
-              className="btn btn-primary"
-            >
+            <button onClick={() => window.location.reload()} className="btn btn-primary">
               Check Status
             </button>
-            <button
-              onClick={logout}
-              className="btn btn-secondary"
-            >
+            <button onClick={logout} className="btn btn-secondary">
               Sign Out
             </button>
           </div>
@@ -98,6 +117,28 @@ const SellerRoute = ({ children }) => {
           <button onClick={logout} className="btn btn-secondary mt-6">
             Sign Out
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (errorStatus === 'Rejected' || seller?.status === 'Rejected') {
+    return (
+      <div className="section-shell py-16">
+        <div className="card mx-auto max-w-lg p-8 text-center border-rose-100 shadow-lg">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-50 text-rose-600">
+            <ShieldAlert size={32} />
+          </div>
+          <h1 className="mt-5 text-2xl font-bold text-slate-900">Application Rejected</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            {seller?.rejectionReason
+              ? `Reason: ${seller.rejectionReason}`
+              : 'Your seller application was not approved by our team.'}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">You can update and resubmit your application.</p>
+          <div className="mt-6">
+            <Navigate to="/seller/register" replace />
+          </div>
         </div>
       </div>
     );

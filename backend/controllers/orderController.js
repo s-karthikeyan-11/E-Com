@@ -2,7 +2,10 @@ const Order = require('../models/Order');
 const User = require('../models/User');
 const Product = require('../models/Product');
 const Payment = require('../models/Payment');
+const WebhookEvent = require('../models/WebhookEvent');
 const DeliveryPartner = require('../models/DeliveryPartner');
+const Seller = require('../models/Seller');
+const SellerTransaction = require('../models/SellerTransaction');
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 const razorpay = require('../config/razorpay');
@@ -11,6 +14,13 @@ const { planDelivery, consumeSlots, restoreSlots, releaseSlots } = require('../u
 const { validateShippingAddress } = require('../utils/address');
 const { getEligibleCoupon, getNextRewardOrderNumber, calculateCouponDiscount } = require('../utils/coupons');
 const { recordSellerEarningsForOrder } = require('./sellerController');
+const {
+  getCategoryCommissionRule,
+  calculateItemFinancials,
+  toPaise,
+  paiseForOrder,
+  postLedgerEntry,
+} = require('../utils/finance');
 
 const errorStatus = (err) => (err.name === 'ValidationError' || err.name === 'CastError' ? 400 : 500);
 
@@ -211,6 +221,13 @@ const getCheckoutDetails = async (userId, applyCoupon = false) => {
     const finalPrice = +(discounted + gstAmount).toFixed(2);
     const lineTotal = +(finalPrice * cartItem.quantity).toFixed(2);
 
+    // Dynamic category commission rate snapshotting (excluding GST and delivery fee from commission base)
+    const commissionRule = await getCategoryCommissionRule(product.category);
+    const itemFin = calculateItemFinancials(
+      { price: product.price, finalPrice, gstPercent: product.gstPercent, quantity: cartItem.quantity, lineTotal },
+      commissionRule
+    );
+
     items.push({
       product: product._id,
       name: product.name,
@@ -224,6 +241,16 @@ const getCheckoutDetails = async (userId, applyCoupon = false) => {
       gstPercent: product.gstPercent,
       finalPrice,
       lineTotal,
+      lineTotalInPaise: itemFin.amountInPaise,
+      commissionRate: itemFin.commissionRate,
+      commissionBaseAmount: itemFin.commissionBaseAmount,
+      commissionBaseInPaise: itemFin.commissionBaseInPaise,
+      commissionBaseType: itemFin.commissionBaseType,
+      commissionAmount: itemFin.commissionAmount,
+      commissionAmountInPaise: itemFin.commissionInPaise,
+      netEarning: itemFin.netEarning,
+      netEarningInPaise: itemFin.netEarningInPaise,
+      isSettled: false,
     });
     subtotal += discounted * cartItem.quantity;
     totalGst += gstAmount * cartItem.quantity;
@@ -242,9 +269,14 @@ const getCheckoutDetails = async (userId, applyCoupon = false) => {
     originalCart,
     items,
     subtotal: +subtotal.toFixed(2),
+    subtotalInPaise: toPaise(subtotal),
     totalGst: +totalGst.toFixed(2),
+    totalGstInPaise: toPaise(totalGst),
     deliveryFee,
+    deliveryFeeInPaise: toPaise(deliveryFee),
+    couponDiscountInPaise: toPaise(couponDiscount),
     totalAmount: +(itemTotal - couponDiscount + deliveryFee).toFixed(2),
+    totalAmountInPaise: toPaise(itemTotal - couponDiscount + deliveryFee),
   };
 };
 
@@ -343,6 +375,185 @@ const isValidSignature = (orderId, paymentId, signature) => {
   return actual.length === expectedBuffer.length && crypto.timingSafeEqual(actual, expectedBuffer);
 };
 
+const isCapturedGatewayPaymentForOrder = (order, payment) => (
+  payment
+  && payment.order_id === order.razorpayOrderId
+  && payment.amount === paiseForOrder(order)
+  && payment.currency === 'INR'
+  && payment.status === 'captured'
+);
+
+// Both the signed Checkout response and the signed Razorpay webhook end here.
+// The compare-and-set is the payment state authority; all financial posts have
+// deterministic idempotency keys, so an interrupted request is safe to retry.
+const finalizeRazorpayCapture = async ({ order, payment, signature = null }) => {
+  if (!isCapturedGatewayPaymentForOrder(order, payment)) {
+    throw httpError(409, 'Payment is not captured for this order yet');
+  }
+
+  if (order.paymentStatus === 'Paid') {
+    if (order.razorpayPaymentId !== payment.id) throw httpError(409, 'This order has already been paid');
+    await recordSellerEarningsForOrder(order);
+    return order;
+  }
+
+  const now = new Date();
+  const paidOrder = await Order.findOneAndUpdate(
+    {
+      _id: order._id,
+      status: 'Awaiting Payment',
+      paymentStatus: 'Pending',
+      razorpayOrderId: order.razorpayOrderId,
+    },
+    {
+      $set: {
+        status: 'Pending',
+        paymentStatus: 'Paid',
+        paymentMethod: mapRazorpayMethod(payment.method),
+        razorpayPaymentId: payment.id,
+        ...(signature ? { razorpaySignature: signature } : {}),
+        ...(Number.isFinite(payment.fee) ? {
+          paymentGatewayFee: payment.fee / 100,
+          paymentGatewayFeeInPaise: payment.fee,
+        } : {}),
+        paidAt: now,
+      },
+      $push: { statusHistory: { status: 'Pending', at: now } },
+    },
+    { new: true, runValidators: true }
+  );
+
+  if (!paidOrder) {
+    const current = await Order.findById(order._id);
+    if (current?.paymentStatus === 'Paid' && current.razorpayPaymentId === payment.id) {
+      await recordSellerEarningsForOrder(current);
+      return current;
+    }
+    throw httpError(409, 'This payment is already being processed. Refresh the order history.');
+  }
+
+  await Payment.findOneAndUpdate(
+    { order: paidOrder._id, razorpayOrderId: paidOrder.razorpayOrderId },
+    {
+      $set: {
+        razorpayPaymentId: payment.id,
+        ...(signature ? { razorpaySignature: signature } : {}),
+        paymentMethod: mapRazorpayMethod(payment.method),
+        amountInPaise: paiseForOrder(paidOrder),
+        capturedAmountInPaise: payment.amount,
+        status: 'SUCCESS',
+        signatureVerified: true,
+        reconciliationStatus: 'Captured',
+        ...(Number.isFinite(payment.fee) ? { gatewayFee: payment.fee / 100, gatewayFeeInPaise: payment.fee } : {}),
+        capturedAt: now,
+        paidAt: now,
+      },
+    },
+    { runValidators: true }
+  );
+
+  await postLedgerEntry({
+    order: paidOrder._id,
+    transactionReference: payment.id,
+    idempotencyKey: `LED_PAY_CAPTURE_${paidOrder._id}`,
+    eventType: 'ORDER_PAYMENT_CAPTURED',
+    debitAccount: 'GatewayReceivable',
+    creditAccount: 'CustomerCash',
+    amountInPaise: paiseForOrder(paidOrder),
+    description: `Razorpay captured payment for Order #${paidOrder._id.toString().slice(-6)}`,
+  });
+
+  await recordSellerEarningsForOrder(paidOrder);
+  return paidOrder;
+};
+
+const verifyWebhookSignature = (rawBody, signature) => {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  if (!secret || !signature || !Buffer.isBuffer(rawBody)) return false;
+  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  const actual = Buffer.from(signature, 'hex');
+  const expectedBuffer = Buffer.from(expected, 'hex');
+  return actual.length === expectedBuffer.length && crypto.timingSafeEqual(actual, expectedBuffer);
+};
+
+// Razorpay sends this independently of the browser. It is deliberately mounted
+// before express.json() so the HMAC covers the original bytes.
+exports.handleRazorpayWebhook = async (req, res) => {
+  const rawBody = req.body;
+  const signature = req.get('x-razorpay-signature');
+  if (!verifyWebhookSignature(rawBody, signature)) {
+    return res.status(400).json({ message: 'Invalid Razorpay webhook signature' });
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(rawBody.toString('utf8'));
+  } catch {
+    return res.status(400).json({ message: 'Invalid Razorpay webhook payload' });
+  }
+
+  const eventType = String(payload.event || 'unknown');
+  const paymentEntity = payload?.payload?.payment?.entity;
+  const providerOrderId = paymentEntity?.order_id || '';
+  const paymentId = paymentEntity?.id || '';
+  const suppliedEventId = req.get('x-razorpay-event-id');
+  const eventId = suppliedEventId || crypto.createHash('sha256').update(rawBody).digest('hex');
+  const payloadDigest = crypto.createHash('sha256').update(rawBody).digest('hex');
+
+  let webhookEvent;
+  try {
+    webhookEvent = await WebhookEvent.create({
+      provider: 'Razorpay', eventId, eventType, payloadDigest, paymentId, providerOrderId,
+    });
+  } catch (err) {
+    if (err.code !== 11000) {
+      console.error('Could not record Razorpay webhook delivery:', err);
+      return res.status(500).json({ message: 'Webhook persistence failed' });
+    }
+    const existing = await WebhookEvent.findOne({ eventId });
+    if (existing?.payloadDigest !== payloadDigest) {
+      return res.status(409).json({ message: 'Webhook event ID payload mismatch' });
+    }
+    if (existing?.status === 'Processed') return res.status(200).json({ received: true, duplicate: true });
+    webhookEvent = await WebhookEvent.findOneAndUpdate(
+      { _id: existing._id, status: 'Failed' },
+      { $set: { status: 'Processing', failureReason: '' } },
+      { new: true }
+    );
+    if (!webhookEvent) return res.status(202).json({ received: true, processing: true });
+  }
+
+  try {
+    if (eventType === 'payment.captured') {
+      if (!providerOrderId || !paymentId) throw httpError(400, 'Captured payment webhook is incomplete');
+      const order = await Order.findOne({ razorpayOrderId: providerOrderId });
+      if (!order) throw httpError(404, 'No local order matches this gateway order');
+      // A signed webhook is authoritative, but fetching the payment adds an
+      // independent server-side amount/status/order validation.
+      const payment = await razorpay.payments.fetch(paymentId);
+      await finalizeRazorpayCapture({ order, payment });
+    } else if (eventType === 'payment.failed' && providerOrderId) {
+      await Payment.updateOne(
+        { razorpayOrderId: providerOrderId, status: { $in: ['CREATED', 'PENDING'] } },
+        { $set: { status: 'FAILED', errorDescription: 'Razorpay reported a failed payment attempt' } }
+      );
+    }
+
+    await WebhookEvent.updateOne(
+      { _id: webhookEvent._id, status: 'Processing' },
+      { $set: { status: 'Processed', processedAt: new Date() } }
+    );
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    await WebhookEvent.updateOne(
+      { _id: webhookEvent._id },
+      { $set: { status: 'Failed', failureReason: String(err.message || 'Webhook processing failed').slice(0, 500) } }
+    );
+    console.error('Razorpay webhook processing failed:', err.message);
+    return res.status(err.status && err.status < 500 ? err.status : 500).json({ message: 'Webhook processing failed' });
+  }
+};
+
 // POST /api/orders  { shippingAddress }  -- places order from current cart
 // Note: uses plain sequential writes (no multi-document transaction) so it
 // works against a standalone MongoDB instance, not just a replica set.
@@ -383,11 +594,16 @@ exports.placeOrder = async (req, res) => {
       user: checkout.user._id,
       items: checkout.items,
       subtotal: checkout.subtotal,
+      subtotalInPaise: checkout.subtotalInPaise,
       totalGst: checkout.totalGst,
+      totalGstInPaise: checkout.totalGstInPaise,
       totalAmount: checkout.totalAmount,
+      totalAmountInPaise: checkout.totalAmountInPaise,
       deliveryFee: checkout.deliveryFee,
+      deliveryFeeInPaise: checkout.deliveryFeeInPaise,
       couponCode: checkout.couponCode,
       couponDiscount: checkout.couponDiscount,
+      couponDiscountInPaise: checkout.couponDiscountInPaise,
       paymentMethod,
       shippingAddress,
       status: 'Pending',
@@ -454,11 +670,16 @@ exports.createRazorpayOrder = async (req, res) => {
       user: checkout.user._id,
       items: checkout.items,
       subtotal: checkout.subtotal,
+      subtotalInPaise: checkout.subtotalInPaise,
       totalGst: checkout.totalGst,
+      totalGstInPaise: checkout.totalGstInPaise,
       totalAmount: checkout.totalAmount,
+      totalAmountInPaise: checkout.totalAmountInPaise,
       deliveryFee: checkout.deliveryFee,
+      deliveryFeeInPaise: checkout.deliveryFeeInPaise,
       couponCode: checkout.couponCode,
       couponDiscount: checkout.couponDiscount,
+      couponDiscountInPaise: checkout.couponDiscountInPaise,
       paymentMethod: 'Razorpay',
       paymentStatus: 'Pending',
       shippingAddress,
@@ -469,7 +690,7 @@ exports.createRazorpayOrder = async (req, res) => {
     });
 
     const razorpayOrder = await razorpay.orders.create({
-      amount: Math.round(localOrder.totalAmount * 100),
+      amount: paiseForOrder(localOrder),
       currency: 'INR',
       receipt: `shopnow_${localOrder._id}`,
       notes: {
@@ -487,6 +708,7 @@ exports.createRazorpayOrder = async (req, res) => {
       razorpayOrderId: razorpayOrder.id,
       paymentMethod: 'Razorpay',
       amount: localOrder.totalAmount,
+      amountInPaise: paiseForOrder(localOrder),
       currency: 'INR',
       status: 'CREATED',
     });
@@ -535,7 +757,10 @@ exports.verifyRazorpayPayment = async (req, res) => {
       return res.status(404).json({ message: 'Razorpay order not found' });
     }
     if (order.paymentStatus === 'Paid') {
-      if (order.razorpayPaymentId === paymentId) return res.json({ order });
+      if (order.razorpayPaymentId === paymentId) {
+        await recordSellerEarningsForOrder(order);
+        return res.json({ order });
+      }
       return res.status(409).json({ message: 'This order has already been paid' });
     }
     if (order.status !== 'Awaiting Payment' || order.razorpayOrderId !== razorpayOrderId) {
@@ -549,60 +774,7 @@ exports.verifyRazorpayPayment = async (req, res) => {
     // payment also confirms that it belongs to this order, has the exact
     // server-calculated amount, and has been captured by Razorpay.
     const payment = await razorpay.payments.fetch(paymentId);
-    const expectedAmount = Math.round(order.totalAmount * 100);
-    if (
-      payment.order_id !== order.razorpayOrderId
-      || payment.amount !== expectedAmount
-      || payment.currency !== 'INR'
-      || payment.status !== 'captured'
-    ) {
-      return res.status(409).json({ message: 'Payment is not captured for this order yet' });
-    }
-
-    const detectedMethod = mapRazorpayMethod(payment.method);
-
-    const paidOrder = await Order.findOneAndUpdate(
-      {
-        _id: order._id,
-        user: req.user._id,
-        status: 'Awaiting Payment',
-        paymentStatus: 'Pending',
-        razorpayOrderId: order.razorpayOrderId,
-      },
-      {
-        $set: {
-          status: 'Pending',
-          paymentStatus: 'Paid',
-          paymentMethod: detectedMethod,
-          razorpayPaymentId: paymentId,
-          razorpaySignature: signature,
-          ...(Number.isFinite(payment.fee) ? { paymentGatewayFee: payment.fee / 100 } : {}),
-          paidAt: new Date(),
-        },
-        $push: { statusHistory: { status: 'Pending', at: new Date() } },
-      },
-      { new: true, runValidators: true }
-    );
-    if (!paidOrder) {
-      return res.status(409).json({ message: 'This payment is already being processed. Refresh the order history.' });
-    }
-
-    await Payment.findOneAndUpdate(
-      { razorpayOrderId: order.razorpayOrderId },
-      {
-        $set: {
-          razorpayPaymentId: paymentId,
-          razorpaySignature: signature,
-          paymentMethod: detectedMethod,
-          status: 'SUCCESS',
-          signatureVerified: true,
-          ...(Number.isFinite(payment.fee) ? { gatewayFee: payment.fee / 100 } : {}),
-          paidAt: new Date(),
-        },
-      }
-    );
-
-    await recordSellerEarningsForOrder(paidOrder).catch(console.error);
+    const paidOrder = await finalizeRazorpayCapture({ order, payment, signature });
 
     res.json({ order: paidOrder });
   } catch (err) {
@@ -680,13 +852,12 @@ exports.recordRazorpayPaymentFailure = async (req, res) => {
     if (!order || !order.razorpayOrderId) {
       return res.status(404).json({ message: 'Razorpay order not found' });
     }
-    const { errorDescription, paymentId } = req.body || {};
+    const { errorDescription } = req.body || {};
     await Payment.findOneAndUpdate(
       { razorpayOrderId: order.razorpayOrderId },
       {
         $set: {
           status: 'FAILED',
-          ...(paymentId ? { razorpayPaymentId: paymentId } : {}),
           errorDescription: errorDescription || 'Payment attempt failed',
         },
       }
@@ -805,6 +976,53 @@ const transitionOrder = async (order, status) => {
 
     const walletRefund = await creditWalletRefund(order);
     if (walletRefund) updatedOrder.walletRefund = walletRefund;
+
+    // Financial & Ledger reversals for paid or remitted orders upon cancellation
+    if (order.paymentStatus === 'Paid') {
+      await Payment.updateMany(
+        { order: order._id, status: 'SUCCESS' },
+        { $set: { status: 'REFUNDED' } }
+      );
+
+      for (const item of order.items) {
+        if (item.seller) {
+          await SellerTransaction.updateMany(
+            { order: order._id, product: item.product },
+            { $set: { status: 'Refunded' } }
+          );
+
+          await Seller.findByIdAndUpdate(item.seller, {
+            $inc: {
+              totalSales: -Number(item.lineTotal || 0),
+              totalCommission: -Number(item.commissionAmount || 0),
+              netEarnings: -Number(item.netEarning || 0),
+            },
+          });
+
+          await postLedgerEntry({
+            order: order._id,
+            transactionReference: `REV-COMM-${order._id}`,
+            idempotencyKey: `LED_REV_COMM_${order._id}_${item.product}`,
+            eventType: 'COMMISSION_REVERSED',
+            debitAccount: 'CommissionExpense',
+            creditAccount: 'CustomerRefundPayable',
+            amountInPaise: toPaise(item.commissionAmount),
+            description: `Commission reversed on cancellation of ${item.name}`,
+          }).catch(console.error);
+
+          await postLedgerEntry({
+            order: order._id,
+            transactionReference: `REV-SELLER-${order._id}`,
+            idempotencyKey: `LED_REV_SELLER_${order._id}_${item.product}`,
+            eventType: 'REFUND_ISSUED',
+            debitAccount: 'SellerPayable',
+            creditAccount: 'CustomerRefundPayable',
+            amountInPaise: toPaise(item.netEarning),
+            description: `Seller earnings liability reversed on cancellation of ${item.name}`,
+          }).catch(console.error);
+        }
+      }
+    }
   }
 
   return updatedOrder;
@@ -875,17 +1093,94 @@ const getCancelledAt = (order) => {
   return entry ? new Date(entry.at) : new Date(order.updatedAt);
 };
 
+// GET /api/orders/:id/reorder-preview
+// Returns re-priced totals, wallet balance, and COD eligibility so the frontend
+// can show a payment selection dialog. Read-only — no stock/wallet changes.
+exports.reorderPreview = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid order ID' });
+    const source = await Order.findOne({ _id: req.params.id, user: req.user._id });
+    if (!source) return res.status(404).json({ message: 'Order not found' });
+    if (source.status !== 'Cancelled') return res.status(409).json({ message: 'Only cancelled orders can be renewed' });
+
+    const cancelledAt = getCancelledAt(source);
+    const msLeft = REORDER_WINDOW_MS - (Date.now() - cancelledAt.getTime());
+    if (msLeft <= 0) return res.status(409).json({ message: 'The 24-hour renewal window for this order has ended.' });
+
+    const renewalCount = Number.isInteger(source.renewalCount) ? source.renewalCount : 0;
+    if (renewalCount >= MAX_RENEWALS) return res.status(409).json({ message: 'This order has already used both renewal opportunities.' });
+    if (await Order.exists({ reorderedFrom: source._id })) return res.status(409).json({ message: 'This cancellation has already been renewed.' });
+
+    // Re-price from current product data
+    const products = await Product.find({ _id: mongoose.trusted({ $in: source.items.map((i) => i.product) }) });
+    const byId = new Map(products.map((p) => [String(p._id), p]));
+    let subtotal = 0;
+    let totalGst = 0;
+    const previewItems = [];
+    for (const old of source.items) {
+      const product = byId.get(String(old.product));
+      if (!product || !product.isActive) return res.status(409).json({ message: `${old.name} is no longer available`, unavailable: true });
+      if (product.stock < old.quantity) return res.status(409).json({ message: `Only ${product.stock} of ${product.name} left in stock`, lowStock: true });
+      const discounted = +(product.price - (product.price * product.discountPercent) / 100).toFixed(2);
+      const gstAmount = +((discounted * product.gstPercent) / 100).toFixed(2);
+      const finalPrice = +(discounted + gstAmount).toFixed(2);
+      previewItems.push({ name: product.name, quantity: old.quantity, finalPrice, lineTotal: +(finalPrice * old.quantity).toFixed(2) });
+      subtotal += discounted * old.quantity;
+      totalGst += gstAmount * old.quantity;
+    }
+    const itemTotal = +(subtotal + totalGst).toFixed(2);
+    const deliveryFee = computeDeliveryFee(itemTotal);
+    const totalAmount = +(itemTotal + deliveryFee).toFixed(2);
+
+    const user = await User.findById(req.user._id).select('walletBalance');
+    const walletBalance = +(user?.walletBalance || 0);
+    const walletSufficient = walletBalance >= totalAmount;
+
+    // COD eligible: the source order's shipping address is valid
+    const shippingAddress = validateShippingAddress(source.shippingAddress?.toObject?.() || source.shippingAddress);
+    const codEligible = Boolean(shippingAddress);
+
+    const originalPaymentWasOnline = source.paymentMethod !== 'Cash on Delivery';
+    const wasRefundedToWallet = Boolean(source.walletRefund?.creditedAt);
+
+    res.json({
+      totalAmount,
+      itemTotal,
+      deliveryFee,
+      walletBalance,
+      walletSufficient,
+      codEligible,
+      originalPaymentWasOnline,
+      wasRefundedToWallet,
+      renewalsLeft: MAX_RENEWALS - renewalCount,
+      msLeft: Math.floor(msLeft),
+      items: previewItems,
+      estimatedDelivery: source.estimatedDelivery,
+    });
+  } catch (err) {
+    res.status(err.status || errorStatus(err)).json({ message: err.status ? err.message : 'Failed to load renewal preview' });
+  }
+};
+
 // POST /api/orders/:id/reorder
-// Creates a NEW wallet-paid order from a cancelled order, within 24h of cancellation.
-// Uses today's price and stock. The cancelled order is never modified or reactivated.
+// Creates a NEW order from a cancelled order within 24 h of cancellation.
+// paymentMethod: 'Wallet' (default) or 'Cash on Delivery'.
+// Uses today's price and stock. The cancelled order is never modified.
 exports.reorderCancelledOrder = async (req, res) => {
   let checkoutLocked = false;
   let reservedItems = [];
   let deliverySlots = [];
-  let walletPayment;
+  let walletPayment; // tracks debit so it can be rolled back on failure
 
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ message: 'Invalid order ID' });
+
+    // Validate requested payment method early
+    const requestedMethod = (req.body.paymentMethod || 'Wallet').trim();
+    if (!['Wallet', 'Cash on Delivery'].includes(requestedMethod)) {
+      return res.status(400).json({ message: 'Payment method must be "Wallet" or "Cash on Delivery"' });
+    }
+
     const source = await Order.findOne({ _id: req.params.id, user: req.user._id });
     if (!source) return res.status(404).json({ message: 'Order not found' });
     if (source.status !== 'Cancelled') return res.status(409).json({ message: 'Only cancelled orders can be reordered' });
@@ -936,12 +1231,9 @@ exports.reorderCancelledOrder = async (req, res) => {
     }
     const itemTotal = +(subtotal + totalGst).toFixed(2);
     const deliveryFee = computeDeliveryFee(itemTotal);
+    const totalAmount = +(itemTotal + deliveryFee).toFixed(2);
 
-    // Retain the original committed delivery day when it is still a current
-    // calendar day. The cancellation released its product slots for 24 hours,
-    // and commitDelivery atomically claims them again when they are needed.
-    // If the original date has passed, a fresh earliest delivery is the only
-    // valid promise we can make.
+    // Retain the original committed delivery day when still valid.
     const originalDeliveryDate = source.estimatedDelivery ? toStr(source.estimatedDelivery) : undefined;
     const delivery = await commitDelivery(
       items,
@@ -950,10 +1242,23 @@ exports.reorderCancelledOrder = async (req, res) => {
     deliverySlots = delivery.consumed;
     reservedItems = await reserveStock(items);
 
-    const totalAmount = +(itemTotal + deliveryFee).toFixed(2);
+    // Payment: wallet debit (atomic, balance-checked) or COD (no debit).
     const orderId = new mongoose.Types.ObjectId();
-    await debitWalletForRenewal(req.user._id, orderId, totalAmount);
-    walletPayment = { orderId, amount: totalAmount };
+    let paymentMethod, paymentStatus, paidAt;
+
+    if (requestedMethod === 'Wallet') {
+      // debitWalletForRenewal throws 409 if wallet balance is insufficient.
+      await debitWalletForRenewal(req.user._id, orderId, totalAmount);
+      walletPayment = { orderId, amount: totalAmount };
+      paymentMethod = 'Wallet';
+      paymentStatus = 'Paid';
+      paidAt = new Date();
+    } else {
+      // COD: no wallet interaction; payment collected on delivery.
+      paymentMethod = 'Cash on Delivery';
+      paymentStatus = 'Pending';
+      paidAt = undefined;
+    }
 
     const order = await Order.create({
       _id: orderId,
@@ -963,9 +1268,9 @@ exports.reorderCancelledOrder = async (req, res) => {
       totalGst: +totalGst.toFixed(2),
       totalAmount,
       deliveryFee,
-      paymentMethod: 'Wallet',
-      paymentStatus: 'Paid',
-      paidAt: new Date(),
+      paymentMethod,
+      paymentStatus,
+      ...(paidAt ? { paidAt } : {}),
       shippingAddress,
       status: 'Pending',
       estimatedDelivery: delivery.estimatedDelivery,
@@ -988,6 +1293,7 @@ exports.reorderCancelledOrder = async (req, res) => {
     if (checkoutLocked) await User.updateOne({ _id: req.user._id }, { $unset: { checkoutLock: 1 } });
   }
 };
+
 
 // GET /api/orders/coupon
 // Tells the checkout which automatic coupon (if any) this customer qualifies for, and what it

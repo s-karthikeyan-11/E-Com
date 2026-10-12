@@ -30,6 +30,7 @@ const sellerTransactionSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    orderAmountInPaise: { type: Number, min: 0 },
     commissionRate: {
       type: Number,
       default: 10,
@@ -41,11 +42,13 @@ const sellerTransactionSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    commissionAmountInPaise: { type: Number, min: 0 },
     netEarning: {
       type: Number,
       required: true,
       min: 0,
     },
+    netEarningInPaise: { type: Number, min: 0 },
     status: {
       type: String,
       enum: ['Pending', 'Completed', 'Refunded'],
@@ -65,10 +68,25 @@ const sellerTransactionSchema = new mongoose.Schema(
       default: '',
       maxlength: 300,
     },
+    idempotencyKey: { type: String, unique: true, sparse: true, index: true },
   },
   { timestamps: true }
 );
 
 sellerTransactionSchema.index({ seller: 1, createdAt: -1 });
+
+sellerTransactionSchema.pre('validate', function normalizeTransactionPaise(next) {
+  for (const [paiseField, amountField] of [
+    ['orderAmountInPaise', 'orderAmount'],
+    ['commissionAmountInPaise', 'commissionAmount'],
+    ['netEarningInPaise', 'netEarning'],
+  ]) {
+    if (!Number.isSafeInteger(this[paiseField]) && Number.isFinite(this[amountField])) {
+      this[paiseField] = Math.round(this[amountField] * 100);
+    }
+    if (Number.isSafeInteger(this[paiseField])) this[amountField] = +(this[paiseField] / 100).toFixed(2);
+  }
+  next();
+});
 
 module.exports = mongoose.model('SellerTransaction', sellerTransactionSchema);

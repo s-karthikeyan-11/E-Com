@@ -16,6 +16,7 @@ const adminRoutes = require('./routes/adminRoutes');
 const addressRoutes = require('./routes/addressRoutes');
 const sellerRoutes = require('./routes/sellerRoutes');
 const deliveryRoutes = require('./routes/deliveryRoutes');
+const { handleRazorpayWebhook } = require('./controllers/orderController');
 
 const app = express();
 const configuredClientOrigins = getClientOrigins();
@@ -55,6 +56,9 @@ app.use(cors({
   maxAge: 86400,
 }));
 app.use(cookieParser());
+// Must precede express.json(): Razorpay signatures are calculated over the
+// exact request bytes, not a re-serialized JavaScript object.
+app.post('/api/payments/razorpay/webhook', express.raw({ type: 'application/json', limit: '1mb' }), handleRazorpayWebhook);
 app.use(express.json({ limit: '5mb' }));
 
 app.get('/api/health', (req, res) => {
@@ -93,9 +97,12 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
+const { seedDefaultCommissionRates } = require('./utils/finance');
+
 const startServer = async () => {
   validateEnvironment();
   await connectDB();
+  await seedDefaultCommissionRates();
 
   // Wait for the listener explicitly so an occupied port is reported through
   // startServer's normal error path rather than as an unhandled EventEmitter error.

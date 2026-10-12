@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AlertCircle, Clock, Lock, Mail, ShieldAlert, Store } from 'lucide-react';
-import api from '../../api/axios';
+import { AlertCircle, Clock, Lock, Mail, Store } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const SellerLogin = () => {
@@ -20,9 +19,13 @@ const SellerLogin = () => {
     setLoading(true);
 
     try {
-      const { data } = await api.post('/seller/login', { email, password });
-      // Reload auth context
-      await login(email, password);
+      // Use unified login — sets the HTTP-only cookie for the whole app.
+      // Then verify the account is actually an approved seller.
+      const loggedInUser = await login(email, password);
+      if (loggedInUser.role !== 'seller') {
+        setError('This account is not registered as a seller. Go to "Become a Seller" to apply.');
+        return;
+      }
       navigate('/seller/dashboard');
     } catch (err) {
       const res = err.response?.data;

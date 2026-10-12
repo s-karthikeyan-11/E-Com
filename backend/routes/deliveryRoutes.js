@@ -20,6 +20,11 @@ router.post('/login', loginDeliveryPartner);
 // Protected routes (require delivery role or admin)
 router.use(protect, deliveryOnly);
 
+const {
+  getDeliveryPartnerEarnings,
+  requestDeliverySettlement,
+} = require('../controllers/settlementController');
+
 router.get('/profile', getDeliveryProfile);
 router.put('/profile', updateDeliveryProfile);
 router.get('/dashboard', getDeliveryDashboard);
@@ -27,5 +32,9 @@ router.get('/orders', getAssignedOrders);
 router.get('/orders/:id', getOrderShipmentDetails);
 router.put('/orders/:id/status', updateDeliveryStatus);
 router.get('/history', getDeliveryHistory);
+
+// Earnings & Settlement routes
+router.get('/earnings', getDeliveryPartnerEarnings);
+router.post('/settlements/request', requestDeliverySettlement);
 
 module.exports = router;

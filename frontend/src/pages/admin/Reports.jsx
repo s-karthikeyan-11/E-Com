@@ -213,7 +213,7 @@ const AdminReports = () => {
           <KpiCard label="Total orders" value={report.summary.totalOrders} detail={`${report.orders.statuses.Delivered || 0} delivered`} tone="from-sky-600 to-cyan-500" />
           <KpiCard label="Average order value" value={fmtINR(report.summary.averageOrderValue)} detail="Based on settled, non-cancelled orders" tone="from-fuchsia-600 to-pink-500" />
           <KpiCard label="Customers" value={report.summary.totalCustomers} detail={`${report.customers.repeat} repeat · ${report.customers.new} new registrations`} tone="from-amber-500 to-orange-500" />
-          <KpiCard label="Sellers" value="Not available" detail="No seller, commission, or payout records exist" tone="from-slate-500 to-slate-600" />
+          <KpiCard label="Sellers" value={report.summary.totalSellers ?? 'N/A'} detail={report.sellers.note} tone="from-slate-500 to-slate-600" />
           <KpiCard label="Refunds" value={fmtINR(report.summary.totalRefunds)} detail={`${report.orders.refunded} wallet-credit refund${report.orders.refunded === 1 ? '' : 's'}`} tone="from-rose-600 to-red-500" />
         </div>
 

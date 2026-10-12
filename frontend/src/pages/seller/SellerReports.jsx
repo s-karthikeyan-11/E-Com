@@ -121,50 +121,57 @@ const SellerReports = () => {
   const handleExportCSV = () => {
     if (!data) return;
 
-    const { summary, topProducts, dailyTrend, categoryBreakdown } = data;
-    const rows = [
-      ['Shopping-Now Seller Performance & Sales Report'],
-      [`Date Range: ${summary.from} to ${summary.to}`],
-      [`Generated: ${new Date().toLocaleString('en-IN')}`],
-      [],
-      ['=== FINANCIAL SUMMARY ==='],
-      ['Metric', 'Value'],
-      ['Gross Merchandise Value (GMV)', `Rs. ${summary.grossSales.toFixed(2)}`],
-      ['Platform Commission Deducted', `Rs. ${summary.totalCommission.toFixed(2)}`],
-      ['Net Seller Earnings', `Rs. ${summary.netEarnings.toFixed(2)}`],
-      ['Platform Commission Rate', `${summary.commissionRate}%`],
-      ['Total Orders Received', summary.totalOrders],
-      ['Total Units Sold', summary.unitsSold],
-      ['Average Order Value (AOV)', `Rs. ${summary.avgOrderValue.toFixed(2)}`],
-      ['Delivered Orders', summary.deliveredOrders],
-      ['Pending / In-Transit Orders', summary.pendingOrders],
-      ['Cancelled Orders', summary.cancelledOrders],
-      [],
-      ['=== TOP SELLING PRODUCTS ==='],
-      ['Product ID', 'Product Title', 'Units Sold', 'Total Revenue (INR)'],
-      ...topProducts.map((p) => [
-        `"${p.id}"`,
-        `"${p.name?.replace(/"/g, '""') || 'Product'}"`,
-        p.units,
-        `Rs. ${p.revenue.toFixed(2)}`,
-      ]),
-      [],
-      ['=== CATEGORY BREAKDOWN ==='],
-      ['Category', 'Revenue (INR)', 'Revenue Share (%)'],
-      ...categoryBreakdown.map((c) => [
-        `"${c.category}"`,
-        `Rs. ${c.revenue.toFixed(2)}`,
-        `${c.share}%`,
-      ]),
-      [],
-      ['=== DAILY SALES TIMELINE ==='],
-      ['Date', 'Revenue (INR)', 'Orders Count', 'Units Sold'],
-      ...dailyTrend.map((d) => [d.date, `Rs. ${d.sales.toFixed(2)}`, d.orders, d.units]),
-    ];
+    try {
+      const toRS = (v) => `Rs. ${Number(v || 0).toFixed(2)}`;
+      const { summary = {}, topProducts = [], dailyTrend = [], categoryBreakdown = [] } = data;
 
-    const csvContent = '\uFEFF' + rows.map((r) => r.join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    downloadBlob(blob, `Seller_Report_${summary.from}_to_${summary.to}.csv`);
+      const rows = [
+        ['Shopping-Now Seller Performance & Sales Report'],
+        [`Date Range: ${summary.from || ''} to ${summary.to || ''}`],
+        [`Generated: ${new Date().toLocaleString('en-IN')}`],
+        [],
+        ['=== FINANCIAL SUMMARY ==='],
+        ['Metric', 'Value'],
+        ['Gross Merchandise Value (GMV)', toRS(summary.grossSales)],
+        ['Platform Commission Deducted', toRS(summary.totalCommission)],
+        ['Net Seller Earnings', toRS(summary.netEarnings)],
+        ['Platform Commission Rate', `${summary.commissionRate || 0}%`],
+        ['Total Orders Received', summary.totalOrders || 0],
+        ['Total Units Sold', summary.unitsSold || 0],
+        ['Average Order Value (AOV)', toRS(summary.avgOrderValue)],
+        ['Delivered Orders', summary.deliveredOrders || 0],
+        ['Pending / In-Transit Orders', summary.pendingOrders || 0],
+        ['Cancelled Orders', summary.cancelledOrders || 0],
+        [],
+        ['=== TOP SELLING PRODUCTS ==='],
+        ['Product ID', 'Product Title', 'Units Sold', 'Total Revenue (INR)'],
+        ...topProducts.map((p) => [
+          `"${p.id || ''}"`,
+          `"${String(p.name || 'Product').replace(/"/g, '""')}"`,
+          p.units || 0,
+          toRS(p.revenue),
+        ]),
+        [],
+        ['=== CATEGORY BREAKDOWN ==='],
+        ['Category', 'Revenue (INR)', 'Revenue Share (%)'],
+        ...categoryBreakdown.map((c) => [
+          `"${String(c.category || '').replace(/"/g, '""')}"`,
+          toRS(c.revenue),
+          `${c.share || 0}%`,
+        ]),
+        [],
+        ['=== DAILY SALES TIMELINE ==='],
+        ['Date', 'Revenue (INR)', 'Orders Count', 'Units Sold'],
+        ...dailyTrend.map((d) => [d.date || '', toRS(d.sales), d.orders || 0, d.units || 0]),
+      ];
+
+      const csvContent = '\uFEFF' + rows.map((r) => r.join(',')).join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      downloadBlob(blob, `Seller_Report_${summary.from || 'report'}_to_${summary.to || 'now'}.csv`);
+    } catch (err) {
+      console.error('CSV export failed:', err);
+      alert('Failed to generate CSV. Please try again.');
+    }
   };
 
   const summary = data?.summary || {};

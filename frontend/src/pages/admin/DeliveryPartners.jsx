@@ -56,6 +56,18 @@ const DeliveryPartners = () => {
   const [partnerShipments, setPartnerShipments] = useState([]);
   const [loadingShipments, setLoadingShipments] = useState(false);
 
+  // Assign Delivery Modal state
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [assignPartnerId, setAssignPartnerId] = useState('');
+  const [assignOrderId, setAssignOrderId] = useState('');
+  const [assignExpectedDate, setAssignExpectedDate] = useState('');
+  const [assignNotes, setAssignNotes] = useState('');
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState('');
+  const [assignSuccess, setAssignSuccess] = useState('');
+  const [assignOrdersList, setAssignOrdersList] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+
   const loadPartners = () => {
     setLoading(true);
     setError('');
@@ -77,6 +89,60 @@ const DeliveryPartners = () => {
   useEffect(() => {
     loadPartners();
   }, [statusFilter]);
+
+  const openAssignModal = async (preselectedPartner = null) => {
+    const activeList = partners.filter((p) => p.status === 'Active');
+    const targetId = preselectedPartner?._id || activeList[0]?._id || partners[0]?._id || '';
+    setAssignPartnerId(targetId);
+    setAssignOrderId('');
+    setAssignNotes('');
+    setAssignError('');
+    setAssignExpectedDate(new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10));
+    setShowAssignModal(true);
+    setLoadingOrders(true);
+
+    try {
+      const { data } = await api.get('/admin/orders');
+      const nonCancelled = (data || []).filter((o) => o.status !== 'Cancelled');
+      setAssignOrdersList(nonCancelled);
+      if (nonCancelled.length > 0) {
+        const unassigned = nonCancelled.find((o) => !o.deliveryPartner);
+        setAssignOrderId(unassigned?._id || nonCancelled[0]._id);
+      }
+    } catch {
+      setAssignOrdersList([]);
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  const handleAssignSubmit = async (e) => {
+    e.preventDefault();
+    if (!assignOrderId || !assignPartnerId) {
+      setAssignError('Please select both an order and a delivery partner.');
+      return;
+    }
+
+    setAssigning(true);
+    setAssignError('');
+
+    try {
+      const { data } = await api.post(`/admin/orders/${assignOrderId}/assign-delivery`, {
+        partnerId: assignPartnerId,
+        expectedDeliveryDate: assignExpectedDate,
+        notes: assignNotes,
+      });
+
+      setShowAssignModal(false);
+      setAssignSuccess(data.message || 'Delivery successfully assigned!');
+      setTimeout(() => setAssignSuccess(''), 5000);
+      loadPartners();
+    } catch (err) {
+      setAssignError(err.response?.data?.message || 'Failed to assign delivery');
+    } finally {
+      setAssigning(false);
+    }
+  };
 
   const openAddModal = () => {
     setEditingPartner(null);
@@ -221,14 +287,31 @@ const DeliveryPartners = () => {
           </p>
         </div>
 
-        <button
-          onClick={openAddModal}
-          className="btn btn-primary inline-flex items-center gap-2 self-start text-xs font-bold uppercase tracking-wider shadow-sm sm:self-auto"
-        >
-          <Plus size={16} />
-          <span>Add Delivery Partner</span>
-        </button>
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          <button
+            onClick={() => openAssignModal()}
+            className="btn btn-secondary inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider shadow-2xs text-sky-700 bg-sky-50/80 hover:bg-sky-100 border border-sky-200"
+          >
+            <Truck size={16} />
+            <span>Assign Delivery</span>
+          </button>
+
+          <button
+            onClick={openAddModal}
+            className="btn btn-primary inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider shadow-sm"
+          >
+            <Plus size={16} />
+            <span>Add Delivery Partner</span>
+          </button>
+        </div>
       </div>
+
+      {assignSuccess && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold text-emerald-800 flex items-center gap-2">
+          <Truck size={16} className="text-emerald-600 shrink-0" />
+          <span>{assignSuccess}</span>
+        </div>
+      )}
 
       {/* 4 Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -443,6 +526,17 @@ const DeliveryPartners = () => {
                         >
                           <Edit2 size={15} />
                         </button>
+
+                        {p.status === 'Active' && (
+                          <button
+                            onClick={() => openAssignModal(p)}
+                            className="btn btn-secondary text-[11px] py-1 px-2.5 text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 font-bold flex items-center gap-1 shadow-2xs"
+                            title="Assign an order to this partner"
+                          >
+                            <Truck size={12} />
+                            <span>Assign</span>
+                          </button>
+                        )}
 
                         {p.status === 'Pending' ? (
                           <>
@@ -755,6 +849,137 @@ const DeliveryPartners = () => {
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Assign Delivery Partner Modal */}
+      {showAssignModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
+          <div className="relative w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl sm:p-7">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 sm:text-lg">
+                  Assign Order to Delivery Partner
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Select an order, assign a courier, and automatically generate an AWB tracking number
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAssignModal(false)}
+                className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {assignError && (
+              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 flex items-center gap-2">
+                <AlertCircle size={15} className="shrink-0 text-rose-600" />
+                <span>{assignError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleAssignSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
+                  1. Select Courier Partner *
+                </label>
+                {partners.length === 0 ? (
+                  <p className="text-xs text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200">
+                    No delivery partners registered in the fleet yet.
+                  </p>
+                ) : (
+                  <select
+                    value={assignPartnerId}
+                    onChange={(e) => setAssignPartnerId(e.target.value)}
+                    className="input text-xs font-semibold"
+                    required
+                  >
+                    <option value="">-- Choose Courier Partner --</option>
+                    {partners.map((p) => (
+                      <option key={p._id} value={p._id}>
+                        {p.name} · {p.serviceType} ({p.phone}) [{p.status}] {p.vehicleNumber ? `[${p.vehicleNumber}]` : ''} — {p.activeShipmentsCount || 0} active dispatches
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
+                  2. Select Customer Order *
+                </label>
+                {loadingOrders ? (
+                  <div className="p-3 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-center gap-2">
+                    <RefreshCw size={14} className="animate-spin text-indigo-600" />
+                    <span>Loading customer orders…</span>
+                  </div>
+                ) : assignOrdersList.length === 0 ? (
+                  <p className="text-xs text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                    No eligible customer orders available for dispatch.
+                  </p>
+                ) : (
+                  <select
+                    value={assignOrderId}
+                    onChange={(e) => setAssignOrderId(e.target.value)}
+                    className="input text-xs font-semibold"
+                    required
+                  >
+                    <option value="">-- Choose Order to Assign --</option>
+                    {assignOrdersList.map((o) => (
+                      <option key={o._id} value={o._id}>
+                        #{o._id.slice(-6).toUpperCase()} · {o.user?.name || 'Customer'} · ₹{Number(o.totalAmount || 0).toFixed(0)} · {o.shippingAddress?.city || 'City'} · [{o.status}] {o.deliveryPartner ? '(Re-assign)' : '(New)'}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
+                  3. Expected Delivery Date
+                </label>
+                <input
+                  type="date"
+                  value={assignExpectedDate}
+                  onChange={(e) => setAssignExpectedDate(e.target.value)}
+                  className="input text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">
+                  4. Dispatch & Checkpoint Notes
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Dispatched from Central Logistics Hub to Rider"
+                  value={assignNotes}
+                  onChange={(e) => setAssignNotes(e.target.value)}
+                  className="input text-xs"
+                />
+              </div>
+
+              <div className="mt-6 flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowAssignModal(false)}
+                  className="btn btn-secondary text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={assigning || !assignPartnerId || !assignOrderId}
+                  className="btn btn-primary text-xs px-5 flex items-center gap-1.5"
+                >
+                  <Truck size={14} />
+                  <span>{assigning ? 'Assigning…' : 'Generate AWB & Assign Order'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -161,11 +161,21 @@ exports.updateSellerStatus = async (req, res) => {
     }
 
     await seller.save();
+
+    // Keep User.role in sync with the Seller approval status.
+    // Approved → role becomes 'seller' (grants sellerOnly API access).
+    // Rejected / Suspended → revert to 'user' (revokes seller API access).
+    if (seller.user) {
+      const newRole = status === 'Approved' ? 'seller' : 'user';
+      await User.findByIdAndUpdate(seller.user, { role: newRole });
+    }
+
     res.json(seller);
   } catch (err) {
     res.status(errorStatus(err)).json({ message: 'Failed to update seller status' });
   }
 };
+
 
 // ---------- Analytics / Payments / Reports ----------
 
@@ -829,7 +839,7 @@ exports.getReports = async (req, res) => {
       createdAt: mongoose.trusted({ $gte: storeBoundary(previousStart), $lte: storeBoundary(previousEnd, true) }),
     };
 
-    const [result, previousRevenue, categories, inventory, newCustomers] = await Promise.all([
+    const [result, previousRevenue, categories, inventory, newCustomers, totalActiveSellers] = await Promise.all([
       Order.aggregate([...scopedOrdersPipeline(match, category), { $facet: reportFacets(page, limit) }]),
       salesForRange(previousMatch, category),
       Product.distinct('category').then((items) => items.filter(Boolean).sort((a, b) => a.localeCompare(b))),
@@ -850,6 +860,7 @@ exports.getReports = async (req, res) => {
         },
       ]),
       User.countDocuments({ role: 'user', createdAt: mongoose.trusted({ $gte: range.from, $lte: range.to }) }),
+      require('../models/Seller').countDocuments({ status: 'Approved' }),
     ]);
 
     const data = result[0] || {};
@@ -921,7 +932,7 @@ exports.getReports = async (req, res) => {
         totalOrders: overview.totalOrders || 0,
         averageOrderValue: settledOrders ? reportNumber(totalRevenue / settledOrders) : 0,
         totalCustomers: customerStats.totalCustomers || 0,
-        totalSellers: null,
+        totalSellers: totalActiveSellers || 0,
         totalRefunds: reportNumber(overview.refundAmount),
         salesGrowthPercentage: growth,
         previousPeriodRevenue: previousRevenue,
@@ -988,7 +999,9 @@ exports.getReports = async (req, res) => {
       },
       sellers: {
         available: true,
-        note: 'Active multi-seller marketplace enabled.',
+        note: totalActiveSellers > 0
+          ? `${totalActiveSellers} active seller${totalActiveSellers === 1 ? '' : 's'} on the platform.`
+          : 'No approved sellers yet.',
       },
       orderHistory: {
         items: orderItems,

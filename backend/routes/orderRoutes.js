@@ -10,6 +10,7 @@ const {
   getMyOrders,
   getOrderById,
   cancelMyOrder,
+  reorderPreview,
   reorderCancelledOrder,
   getDeliveryEstimate,
   getCouponStatus,
@@ -24,6 +25,7 @@ router.post('/:id/payment/failed', customerOnly, recordRazorpayPaymentFailure);
 router.get('/delivery-estimate', customerOnly, getDeliveryEstimate);
 router.get('/coupon', customerOnly, getCouponStatus);
 router.post('/:id/cancel', customerOnly, cancelMyOrder);
+router.get('/:id/reorder-preview', customerOnly, reorderPreview);
 router.post('/:id/reorder', customerOnly, reorderCancelledOrder);
 router.post('/', customerOnly, placeOrder);
 router.get('/', getMyOrders);

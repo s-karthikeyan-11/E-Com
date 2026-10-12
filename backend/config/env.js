@@ -14,7 +14,9 @@ const getClientOrigins = () =>
 const getCookieSameSite = () => (process.env.COOKIE_SAME_SITE || 'lax').trim().toLowerCase();
 
 const validateEnvironment = () => {
-  const missing = ['MONGO_URI', 'JWT_SECRET', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET']
+  const required = ['MONGO_URI', 'JWT_SECRET', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET'];
+  if (process.env.NODE_ENV === 'production') required.push('RAZORPAY_WEBHOOK_SECRET');
+  const missing = required
     .filter((key) => !process.env[key]);
   if (missing.length) throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
 

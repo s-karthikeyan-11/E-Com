@@ -33,6 +33,25 @@ const {
   assignOrderDelivery,
   getAllShipments,
 } = require('../controllers/adminDeliveryController');
+const {
+  getFinanceOverview,
+  getCategoryCommissions,
+  updateCategoryCommission,
+  createCategoryCommission,
+  remitCodCash,
+  getFinancialLedgerEntries,
+  reconcileRazorpayPayment,
+  recordShipmentFinancials,
+} = require('../controllers/adminFinanceController');
+const {
+  getAdminSettlements,
+  approveSettlement,
+  startSettlementProcessing,
+  holdSettlement,
+  rejectSettlement,
+  failSettlement,
+  recordSettlementPayout,
+} = require('../controllers/settlementController');
 
 router.use(protect, adminOnly); // every admin route requires an admin JWT
 
@@ -42,6 +61,25 @@ router.get('/analytics', getAnalytics);
 router.get('/payments', getPayments);
 router.get('/report', getReport);
 router.get('/reports', getReports);
+
+// Financial Management, Ledger & Commission routes
+router.get('/finance/overview', getFinanceOverview);
+router.get('/commissions', getCategoryCommissions);
+router.post('/commissions', createCategoryCommission);
+router.put('/commissions/:id', updateCategoryCommission);
+router.put('/shipments/:id/remit-cod', remitCodCash);
+router.put('/shipments/:id/financials', recordShipmentFinancials);
+router.put('/payments/:orderId/reconcile', reconcileRazorpayPayment);
+router.get('/ledger', getFinancialLedgerEntries);
+
+// Settlement & Payout routes
+router.get('/settlements', getAdminSettlements);
+router.put('/settlements/:id/approve', approveSettlement);
+router.put('/settlements/:id/processing', startSettlementProcessing);
+router.put('/settlements/:id/hold', holdSettlement);
+router.put('/settlements/:id/reject', rejectSettlement);
+router.put('/settlements/:id/fail', failSettlement);
+router.put('/settlements/:id/payout', recordSettlementPayout);
 
 // Seller Management routes
 router.get('/sellers', getSellers);

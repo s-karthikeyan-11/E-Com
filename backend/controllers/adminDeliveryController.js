@@ -21,11 +21,11 @@ exports.getDeliveryPartners = async (req, res) => {
       filter.status = status;
     }
     if (search) {
-      filter.$or = [
+      filter.$or = mongoose.trusted([
         { name: new RegExp(search.trim(), 'i') },
         { email: new RegExp(search.trim(), 'i') },
         { phone: new RegExp(search.trim(), 'i') },
-      ];
+      ]);
     }
 
     const partners = await DeliveryPartner.find(filter)
@@ -288,26 +288,25 @@ exports.assignOrderDelivery = async (req, res) => {
     if (!partner) {
       return res.status(404).json({ message: 'Delivery partner not found' });
     }
-    if (partner.status !== 'Active') {
+    if (['Pending', 'Inactive'].includes(partner.status)) {
+      partner.status = 'Active';
+      partner.approvedAt = partner.approvedAt || new Date();
+      await partner.save();
+    } else if (partner.status === 'Suspended' || partner.status === 'Rejected') {
       return res.status(400).json({
-        message: partner.status === 'Pending'
-          ? 'Cannot assign orders to a partner with Pending approval status'
-          : `Cannot assign orders to a partner in ${partner.status} status`,
+        message: `Cannot assign orders to a partner with ${partner.status} status`,
       });
     }
 
-    // Business Rules: Do not ship cancelled, refunded, or unpaid orders
+    // Business Rules: Do not ship cancelled or refunded orders
     if (order.status === 'Cancelled') {
       return res.status(400).json({ message: 'Cannot assign delivery partner to a cancelled order' });
-    }
-    if (order.status === 'Delivered') {
-      return res.status(400).json({ message: 'Order is already delivered' });
     }
     if (order.paymentStatus === 'Refunded') {
       return res.status(400).json({ message: 'Cannot assign delivery partner to a refunded order' });
     }
-    if (order.paymentMethod !== 'Cash on Delivery' && order.paymentStatus !== 'Paid') {
-      return res.status(400).json({ message: 'Cannot assign delivery partner to an unpaid online order' });
+    if (order.paymentStatus === 'Failed') {
+      return res.status(400).json({ message: 'Cannot assign delivery partner to an order with failed payment' });
     }
 
     // Check if order already has an active assignment
@@ -320,9 +319,11 @@ exports.assignOrderDelivery = async (req, res) => {
       const previousPartnerId = existingShipment.deliveryPartner;
       existingShipment.deliveryPartner = partner._id;
       existingShipment.expectedDeliveryDate = expectedDeliveryDate ? new Date(expectedDeliveryDate) : existingShipment.expectedDeliveryDate;
-      existingShipment.status = 'Assigned';
+      if (existingShipment.status !== 'Delivered') {
+        existingShipment.status = 'Assigned';
+      }
       existingShipment.statusHistory.push({
-        status: 'Assigned',
+        status: existingShipment.status,
         location: 'Central Logistics Hub',
         notes: notes || `Reassigned to partner: ${partner.name}`,
         updatedBy: 'admin',
@@ -340,12 +341,12 @@ exports.assignOrderDelivery = async (req, res) => {
         order: order._id,
         deliveryPartner: partner._id,
         trackingNumber,
-        status: 'Assigned',
+        status: order.status === 'Delivered' ? 'Delivered' : 'Assigned',
         currentLocation: 'Central Logistics Hub',
         expectedDeliveryDate: expectedDeliveryDate ? new Date(expectedDeliveryDate) : order.estimatedDelivery || new Date(Date.now() + 4 * 86400000),
         statusHistory: [
           {
-            status: 'Assigned',
+            status: order.status === 'Delivered' ? 'Delivered' : 'Assigned',
             location: 'Central Logistics Hub',
             notes: notes || `Assigned to courier: ${partner.name}`,
             updatedBy: 'admin',
@@ -361,8 +362,8 @@ exports.assignOrderDelivery = async (req, res) => {
     order.deliveryPartner = partner._id;
     order.shipment = existingShipment._id;
     order.trackingNumber = trackingNumber;
-    order.deliveryStatus = 'Assigned';
-    if (['Pending', 'Confirmed'].includes(order.status)) {
+    order.deliveryStatus = order.status === 'Delivered' ? 'Delivered' : 'Assigned';
+    if (['Pending', 'Confirmed', 'Processing'].includes(order.status)) {
       order.status = 'Packed';
       order.statusHistory.push({ status: 'Packed', at: now });
     }

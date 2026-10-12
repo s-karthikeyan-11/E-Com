@@ -104,6 +104,7 @@ const sellerSchema = new mongoose.Schema(
       accountNumber: { type: String, default: '', maxlength: 40 },
       ifscCode: { type: String, default: '', maxlength: 20 },
       bankName: { type: String, default: '', maxlength: 100 },
+      upiId: { type: String, default: '', maxlength: 120 },
     },
   },
   { timestamps: true }

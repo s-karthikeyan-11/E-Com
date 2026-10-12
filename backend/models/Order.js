@@ -19,6 +19,23 @@ const orderItemSchema = new mongoose.Schema(
     gstPercent: { type: Number, required: true, default: 0 },
     finalPrice: { type: Number, required: true }, // per-unit final price at order time
     lineTotal: { type: Number, required: true }, // finalPrice * quantity
+    // Canonical monetary snapshots. Legacy INR fields above remain read-compatible.
+    lineTotalInPaise: { type: Number, min: 0 },
+    // Snapshots of commission & net earning at order confirmation time
+    commissionRate: { type: Number, default: 10, min: 0, max: 100 },
+    commissionBaseAmount: { type: Number, default: 0, min: 0 },
+    commissionBaseInPaise: { type: Number, default: 0, min: 0 },
+    commissionBaseType: {
+      type: String,
+      enum: ['final_price_ex_gst', 'base_price', 'line_total'],
+      default: 'final_price_ex_gst',
+    },
+    commissionAmount: { type: Number, default: 0, min: 0 },
+    commissionAmountInPaise: { type: Number, default: 0, min: 0 },
+    netEarning: { type: Number, default: 0, min: 0 },
+    netEarningInPaise: { type: Number, default: 0, min: 0 },
+    isSettled: { type: Boolean, default: false, index: true },
+    settlementId: { type: mongoose.Schema.Types.ObjectId, ref: 'Settlement', default: null, index: true },
   },
   { _id: false }
 );
@@ -28,16 +45,22 @@ const orderSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     items: [orderItemSchema],
     subtotal: { type: Number, required: true },
+    subtotalInPaise: { type: Number, min: 0 },
     totalGst: { type: Number, required: true },
+    totalGstInPaise: { type: Number, min: 0 },
     totalAmount: { type: Number, required: true },
+    totalAmountInPaise: { type: Number, min: 0, index: true },
     deliveryFee: { type: Number, default: 0, min: 0 },
+    deliveryFeeInPaise: { type: Number, default: 0, min: 0 },
     // Loyalty coupon used on this order (see utils/coupons.js). totalAmount already has it subtracted.
     couponCode: { type: String },
     couponDiscount: { type: Number, default: 0, min: 0 },
+    couponDiscountInPaise: { type: Number, default: 0, min: 0 },
     // A paid order cancelled by the store is refunded to the customer's wallet.
     // Its presence also makes the credit safe to retry without duplicating money.
     walletRefund: {
       amount: { type: Number, min: 0.01 },
+      amountInPaise: { type: Number, min: 1 },
       creditedAt: { type: Date },
     },
     paymentMethod: {
@@ -47,15 +70,24 @@ const orderSchema = new mongoose.Schema(
     },
     paymentStatus: {
       type: String,
-      enum: ['Pending', 'Paid', 'Failed'],
+      enum: ['Pending', 'Paid', 'Partially Refunded', 'Refunded', 'Failed'],
       default: 'Pending',
     },
+    // COD Cash Collection & Hub Remittance Lifecycle
+    codCollected: { type: Boolean, default: false, index: true },
+    codCollectedAt: { type: Date, default: null },
+    codRemitted: { type: Boolean, default: false, index: true },
+    codRemittedAt: { type: Date, default: null },
+    codRemittanceReference: { type: String, default: '' },
     // Gateway identifiers are stored only after the server creates/verifies them.
     razorpayOrderId: { type: String, unique: true, sparse: true },
     razorpayPaymentId: { type: String, unique: true, sparse: true },
     razorpaySignature: { type: String, select: false },
     paymentGatewayFee: { type: Number, min: 0, select: false },
+    paymentGatewayFeeInPaise: { type: Number, min: 0, select: false },
     paidAt: { type: Date },
+    refundedAmountInPaise: { type: Number, default: 0, min: 0 },
+    refundReservedInPaise: { type: Number, default: 0, min: 0, select: false },
     shippingAddress: {
       line1: { type: String, default: '' },
       city: { type: String, default: '' },

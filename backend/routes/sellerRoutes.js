@@ -16,6 +16,7 @@ const {
   getSellerEarnings,
   getSellerReports,
   getPublicSellerStore,
+  getSellerApplicationStatus,
 } = require('../controllers/sellerController');
 
 // Public seller routes
@@ -23,6 +24,9 @@ router.post('/register', registerSeller);
 router.post('/login', loginSeller);
 router.get('/store/:sellerId', getPublicSellerStore);
 router.get('/:sellerId/store', getPublicSellerStore);
+
+// Any authenticated user: lets the SellerRoute check application state
+router.get('/application-status', protect, getSellerApplicationStatus);
 
 // Protected seller routes (requires authenticated seller account with Approved status)
 router.use(protect, sellerOnly);
@@ -40,7 +44,16 @@ router.delete('/products/:id', deleteSellerProduct);
 router.get('/orders', getSellerOrders);
 router.put('/orders/:id/status', updateSellerOrderStatus);
 
+const {
+  getSellerSettlementOverview,
+  requestSellerSettlement,
+} = require('../controllers/settlementController');
+
 router.get('/earnings', getSellerEarnings);
 router.get('/reports', getSellerReports);
+
+// Settlement routes
+router.get('/settlements', getSellerSettlementOverview);
+router.post('/settlements/request', requestSellerSettlement);
 
 module.exports = router;

@@ -97,7 +97,7 @@ const Orders = () => {
 
               <div className="mt-4 flex flex-wrap items-start justify-end gap-3">
                 {['Pending', 'Processing'].includes(o.status) && <button type="button" className="btn btn-outline" onClick={() => { setCancelError(''); setOrderToCancel(o); }}>Cancel order</button>}
-                <ReorderButton order={o} className="btn btn-outline" />
+                <ReorderButton order={o} className="btn btn-outline" onRenewed={loadOrders} />
                 <Link className="btn btn-primary" to={`/order/${o._id}`}>{o.status === 'Cancelled' ? 'View details' : 'Track order'}</Link>
               </div>
             </article>

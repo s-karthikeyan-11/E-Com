@@ -23,6 +23,7 @@ import AdminUsers from './pages/admin/Users';
 import AdminPayments from './pages/admin/Payments';
 import AdminReports from './pages/admin/Reports';
 import AdminSellers from './pages/admin/Sellers';
+import AdminFinance from './pages/admin/AdminFinance';
 import AdminDeliveryPartners from './pages/admin/DeliveryPartners';
 
 import DeliveryRoute from './components/DeliveryRoute';
@@ -44,6 +45,7 @@ import SellerEarnings from './pages/seller/SellerEarnings';
 import SellerProfile from './pages/seller/SellerProfile';
 import SellerReports from './pages/seller/SellerReports';
 import SellerStore from './pages/seller/SellerStore';
+import SellerSettlements from './pages/seller/SellerSettlements';
 
 import Checkout from './pages/Checkout';
 import Profile from './pages/Profile';
@@ -127,6 +129,7 @@ const App = () => (
                 <Route path="products" element={<SellerProducts />} />
                 <Route path="orders" element={<SellerOrders />} />
                 <Route path="earnings" element={<SellerEarnings />} />
+                <Route path="settlements" element={<SellerSettlements />} />
                 <Route path="reports" element={<SellerReports />} />
                 <Route path="profile" element={<SellerProfile />} />
               </Route>
@@ -263,6 +266,11 @@ const App = () => (
                 <Route
                   path="reports"
                   element={<AdminReports />}
+                />
+
+                <Route
+                  path="finance"
+                  element={<AdminFinance />}
                 />
 
                 <Route

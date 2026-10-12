@@ -105,9 +105,15 @@ const SellerRegister = () => {
             <p>Once approved, you can log in to your Seller Hub and start listing products immediately.</p>
           </div>
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
-            <Link to="/seller/login" className="btn btn-primary">
-              Go to Seller Login
-            </Link>
+            {user ? (
+              <Link to="/" className="btn btn-primary">
+                Back to Marketplace
+              </Link>
+            ) : (
+              <Link to="/login" className="btn btn-primary">
+                Log In to Continue Shopping
+              </Link>
+            )}
             <Link to="/" className="btn btn-secondary">
               Back to Marketplace
             </Link>
@@ -317,8 +323,8 @@ const SellerRegister = () => {
 
           <p className="mt-6 text-center text-xs text-slate-500">
             Already have a seller account?{' '}
-            <Link to="/seller/login" className="font-bold text-indigo-700 hover:underline">
-              Log in to Seller Hub
+            <Link to="/seller/dashboard" className="font-bold text-indigo-700 hover:underline">
+              Go to Seller Hub
             </Link>
           </p>
         </div>

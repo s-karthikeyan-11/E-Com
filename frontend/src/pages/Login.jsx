@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
@@ -14,7 +14,6 @@ const Login = () => {
   const { login } = useAuth();
   const { refreshCart } = useCart();
   const navigate = useNavigate();
-  const location = useLocation();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,7 +22,13 @@ const Login = () => {
     try {
       const user = await login(email, password, remember);
       await refreshCart();
-      navigate(user.role === 'admin' ? '/admin' : location.state?.from?.pathname || location.state?.from || '/');
+      if (user.role === 'admin') {
+        navigate('/admin');
+      } else if (user.role === 'seller') {
+        navigate('/seller/dashboard');
+      } else {
+        navigate('/');
+      }
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed');
     } finally {
