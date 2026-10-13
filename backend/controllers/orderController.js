@@ -393,7 +393,7 @@ const finalizeRazorpayCapture = async ({ order, payment, signature = null }) => 
 
   if (order.paymentStatus === 'Paid') {
     if (order.razorpayPaymentId !== payment.id) throw httpError(409, 'This order has already been paid');
-    await recordSellerEarningsForOrder(order);
+    await recordSellerEarningsForOrder(order).catch(console.error);
     return order;
   }
 
@@ -426,7 +426,7 @@ const finalizeRazorpayCapture = async ({ order, payment, signature = null }) => 
   if (!paidOrder) {
     const current = await Order.findById(order._id);
     if (current?.paymentStatus === 'Paid' && current.razorpayPaymentId === payment.id) {
-      await recordSellerEarningsForOrder(current);
+      await recordSellerEarningsForOrder(current).catch(console.error);
       return current;
     }
     throw httpError(409, 'This payment is already being processed. Refresh the order history.');
@@ -463,7 +463,7 @@ const finalizeRazorpayCapture = async ({ order, payment, signature = null }) => 
     description: `Razorpay captured payment for Order #${paidOrder._id.toString().slice(-6)}`,
   });
 
-  await recordSellerEarningsForOrder(paidOrder);
+  await recordSellerEarningsForOrder(paidOrder).catch(console.error);
   return paidOrder;
 };
 
@@ -758,7 +758,7 @@ exports.verifyRazorpayPayment = async (req, res) => {
     }
     if (order.paymentStatus === 'Paid') {
       if (order.razorpayPaymentId === paymentId) {
-        await recordSellerEarningsForOrder(order);
+        await recordSellerEarningsForOrder(order).catch(console.error);
         return res.json({ order });
       }
       return res.status(409).json({ message: 'This order has already been paid' });

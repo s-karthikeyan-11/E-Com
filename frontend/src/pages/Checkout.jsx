@@ -350,6 +350,7 @@ const Checkout = () => {
         },
         modal: {
           ondismiss: async () => {
+            if (paymentSucceeded.current) return;
             setEmbeddedActive(false);
             setEmbeddedLoading(false);
             clearGatewayFrames();
@@ -369,8 +370,15 @@ const Checkout = () => {
             await refreshCart();
             navigate(`/payment-result/${verified.order._id}`);
           } catch (verificationError) {
+            const errMsg = verificationError.response?.data?.message || '';
+            if (errMsg.includes('already been paid')) {
+              clearCartLocal();
+              await refreshCart();
+              navigate(`/payment-result/${data.orderId}`);
+              return;
+            }
             setError(
-              verificationError.response?.data?.message ||
+              errMsg ||
               'Your payment was processed, but order confirmation is taking longer than expected. Please verify your order in Order History.'
             );
             setEmbeddedActive(false);

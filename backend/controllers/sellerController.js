@@ -81,13 +81,14 @@ exports.recordSellerEarningsForOrder = async (order) => {
           commissionAmount: fromPaise(commissionInPaise),
           netEarningInPaise,
           netEarning: fromPaise(netEarningInPaise),
-          status: isPaid ? 'Completed' : 'Pending',
-          paymentStatus: order.paymentStatus,
-          orderStatus: item.sellerStatus || order.status,
           description: `Sale of ${item.name} (x${item.quantity})`,
           idempotencyKey: `SELLER_SALE_${itemKey}`,
         },
-        ...(isPaid ? { $set: { status: 'Completed', paymentStatus: 'Paid' } } : {}),
+        $set: {
+          status: isPaid ? 'Completed' : 'Pending',
+          paymentStatus: order.paymentStatus,
+          orderStatus: item.sellerStatus || order.status,
+        },
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );

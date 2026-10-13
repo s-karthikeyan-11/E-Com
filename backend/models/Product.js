@@ -37,6 +37,14 @@ const productSchema = new mongoose.Schema(
       select: false,
       default: undefined,
     },
+    // Ratings and Reviews
+    rating: { type: Number, default: 0, min: 0, max: 5 },
+    numReviews: { type: Number, default: 0, min: 0 },
+    ratingDistribution: {
+      type: Map,
+      of: Number,
+      default: () => ({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }),
+    },
   },
   { timestamps: true }
 );

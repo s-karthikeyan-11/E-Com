@@ -25,6 +25,7 @@ import AdminReports from './pages/admin/Reports';
 import AdminSellers from './pages/admin/Sellers';
 import AdminFinance from './pages/admin/AdminFinance';
 import AdminDeliveryPartners from './pages/admin/DeliveryPartners';
+import AdminReviews from './pages/admin/AdminReviews';
 
 import DeliveryRoute from './components/DeliveryRoute';
 import DeliveryLayout from './pages/delivery/DeliveryLayout';
@@ -251,6 +252,11 @@ const App = () => (
                 <Route
                   path="orders"
                   element={<AdminOrders />}
+                />
+
+                <Route
+                  path="reviews"
+                  element={<AdminReviews />}
                 />
 
                 <Route

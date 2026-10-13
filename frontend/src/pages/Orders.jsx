@@ -86,7 +86,17 @@ const Orders = () => {
 
               <ul className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-700">
                 {o.items.map((it, idx) => (
-                  <li key={idx} className="flex items-center justify-between gap-3 py-2.5"><span className="min-w-0 truncate">{it.name} × {it.quantity}</span><span className="shrink-0 font-medium">₹{Number(it.lineTotal || 0).toFixed(2)}</span></li>
+                  <li key={idx} className="flex items-center justify-between gap-3 py-2.5">
+                    <span className="min-w-0 truncate">{it.name} × {it.quantity}</span>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="font-medium">₹{Number(it.lineTotal || 0).toFixed(2)}</span>
+                      {o.status === 'Delivered' && (
+                        <Link to={`/product/${it.product}#reviews-section`} className="rounded-md border border-indigo-200 bg-white px-2 py-0.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 transition">
+                          ⭐ Review
+                        </Link>
+                      )}
+                    </div>
+                  </li>
                 ))}
               </ul>
 

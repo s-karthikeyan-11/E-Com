@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Eye, Heart, ShoppingCart, Sparkles } from 'lucide-react';
+import { Eye, Heart, ShoppingCart, Sparkles, Star } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
@@ -115,7 +115,7 @@ const ProductCard = ({ product, onAdded, onWishlistChange }) => {
       </div>
 
       {/* Card body */}
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      <div className="flex flex-1 flex-col gap-2.5 p-4">
 
         {/* Category + name */}
         <div>
@@ -125,14 +125,34 @@ const ProductCard = ({ product, onAdded, onWishlistChange }) => {
           <button
             type="button"
             onClick={() => navigate(`/product/${product._id}`)}
-            className="mt-1.5 line-clamp-2 min-h-[2.8rem] text-left text-sm font-bold leading-snug text-slate-900 transition hover:text-indigo-700"
+            className="mt-1 line-clamp-2 min-h-[2.6rem] text-left text-sm font-bold leading-snug text-slate-900 transition hover:text-indigo-700"
           >
             {product.name}
           </button>
         </div>
 
+        {/* Star Rating row */}
+        <div className="flex items-center gap-1.5 text-xs">
+          {Number(product.numReviews || 0) > 0 ? (
+            <>
+              <div className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 font-bold text-amber-700 border border-amber-200/80 text-[11px]">
+                <Star size={11} className="fill-amber-400 text-amber-500" />
+                <span>{Number(product.rating || 0).toFixed(1)}</span>
+              </div>
+              <span className="text-[11px] text-slate-400 font-medium">
+                ({product.numReviews})
+              </span>
+            </>
+          ) : (
+            <span className="text-[11px] text-slate-400 flex items-center gap-1">
+              <Star size={11} className="text-slate-300" />
+              <span>No reviews yet</span>
+            </span>
+          )}
+        </div>
+
         {/* Price row */}
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 mt-auto">
           <span className="text-2xl font-black tracking-tight text-slate-900">
             ₹{Number(product.finalPrice || 0).toFixed(2)}
           </span>
